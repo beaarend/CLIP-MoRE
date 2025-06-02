@@ -1,6 +1,9 @@
 import torch
-import argparse 
+import argparse
+import torchvision.transforms as transforms 
 from src.clip_architectures import OpenCLIP
+from datasets import build_dataset
+from datasets.utils import build_data_loader
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -10,6 +13,9 @@ def main():
     parser = argparse.ArgumentParser(description="OpenCLIP Model Loader")
     parser.add_argument("--model", type=str, default="open_clip", help="Model to load")
     parser.add_argument("--backbone", type=str, default="ViT-B-32", help="Backbone model to use")
+    parser.add_argument("--dataset", type=str, default="oxford_flowers", help="Dataset to use")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for data loader")
+    parser.add_argument("--shots", type=int, default=4, help="Number of shots for few-shot learning")
 
     args = parser.parse_args()
 
@@ -19,7 +25,21 @@ def main():
     model = OpenCLIP(device)
     model.load_model()
 
-    # create datasets and loaders
+    if args.dataset != "oxford_flowers":
+        raise ValueError("Currently, only 'oxford_flowers' datasets are supported.")
+    
+    dataset = build_dataset(args.dataset, root_path="", shots=args.shots)
+    val_loader = build_data_loader(dataset.val, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    test_loader = build_data_loader(dataset.test, batch_size=args.batch_size, shuffle=False, num_workers=4)
+
+    train_transform = transforms.Compose([
+            transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+    train_loader = build_data_loader(data_source=dataset.train_x, batch_size=args.batch_size, tfm=train_transform, is_train=True, shuffle=True, num_workers=4)
+
     # run more
 
 if __name__ == "__main__":
