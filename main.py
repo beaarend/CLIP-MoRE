@@ -4,6 +4,8 @@ import torchvision.transforms as transforms
 from src.clip_architectures import OpenCLIP
 from datasets import build_dataset
 from datasets.utils import build_data_loader
+from training import run_more_training
+
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -24,6 +26,7 @@ def main():
     
     model = OpenCLIP(device)
     model.load_model()
+    logit_scale = 100
 
     if args.dataset != "oxford_flowers":
         raise ValueError("Currently, only 'oxford_flowers' datasets are supported.")
@@ -35,12 +38,14 @@ def main():
     train_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(p=0.5),
+
+
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
     ])
     train_loader = build_data_loader(data_source=dataset.train_x, batch_size=args.batch_size, tfm=train_transform, is_train=True, shuffle=True, num_workers=4)
 
-    # run more
+    run_more_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader)
 
 if __name__ == "__main__":
     main()
