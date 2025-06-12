@@ -13,3 +13,7 @@ conda activate CLIP-MoRE
 ```bash
 pip3 install torch==2.0.1 torchaudio==2.0.2 torchvision==0.15.2
 ```
+
+https://github.com/SprocketLab/sparse_matrix_fine_tuning -> structured linear here is equal to LoRALayer in LoRA repo
+
+we need to add a layer that adapts nn.Linear and a new multiheadattention module 
