@@ -53,16 +53,17 @@ def set_param(curr_mod, name, param=None, mode='update'):
 # 
 
 class MonarchLayer(nn.Linear):
-    def __init__(self, in_features: int, out_features: int, num_blocks: int, block_rank: int, weights=None):
-        self.in_features = in_features
-        self.out_features = out_features
-        self.num_blocks = num_blocks
-        self.block_rank = block_rank
+    def __init__(self, num_blocks: int, block_rank: int, existing_linear = nn.Linear, dropout_rate: float = 0.0):
+        self.in_features = existing_linear.in_features
+        self.out_features = existing_linear.out_features
         self.monarch_impl = monarch_kernel
         self.block_size = int(math.ceil(self.in_features / self.num_blocks))
 
+        super().__init__(
+            in_features=existing_linear.in_features, 
+            out_features=existing_linear.out_features
+        )
         # Throw away blocks that are fully padded
-
         if ((self.num_blocks * self.block_size) > self.in_features):
             print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are larger than in_features {self.in_features}. Adjusting num_blocks.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
@@ -70,28 +71,24 @@ class MonarchLayer(nn.Linear):
             print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are smaller than in_features {self.in_features}. Adjusting block_size.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
 
-        # dropout, merge, scaler?
+        self.load_state_dict(existing_linear.state_dict())
+        #BaseLayer.__init__(self, in_features, out_features, bias=True)
 
-        # Init block-diagonal monarch factors -> CAREFUL! Original implementation changed paramters orders (block_rank <=> block_size)
-        self.diagonal_block_1 = nn.Parameter(
-            torch.zeros(
-                self.num_blocks, self.block_rank, self.block_size
-            )
-        )
-        self.diagonal_block_2 = nn.Parameter(
-            torch.zeros(
-                self.num_blocks, self.block_size, self.block_rank
-            )
-        )
-    
-    def monarch_adjustment(self, x: torch.Tensor) -> torch.Tensor:
+        """FUNCTIONS NEEDED IN THE BASE LAYER!!!!
+        # self.params_with_monarch = {'weight': 'w'} ####### dict with the correct names 
+        # self.register_monarch_param() ######### creates monarch parameters -> diagonal matrices
+        # self.init_monarch_param() ############ kaiming init or zero, read paper
+        # self.weight.data = self.transpose(self.weight.data) fan in fan out
 
-        monarch_output = self.monarch_impl(
-            self.preprocess(x),
-            self.diagonal_block_1,
-            self.diagonal_block_2,
-        )
-        return self.postprocess(monarch_output)
+        # Preprocess and postprocess might not be needed because CLIP dimensions are both fixed and the same value, but still...
+        # monarch_adjustment !
+
+        """
+        # dropout?
+        # if dropout_rate > 0:
+        #     self.dropout = nn.Dropout(dropout_rate)
+        # else:
+        #     self.dropout = None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -113,19 +110,7 @@ class MonarchLayer(nn.Linear):
         super().train(mode)
         self.base_train(mode)
     
-    # Preprocess and postprocess might not be needed because CLIP dimensions are both fixed and the same value, but still...
-
-    def preprocess(self, x):
-        self.in_features = x.shape[-1]
-        if self.in_features < self.num_blocks * self.block_size:
-            x = F.pad(x, (0, self.num_blocks * self.block_size - self.in_features))
-        return x
-
-    def postprocess(self, output):
-        out_features = output.shape[-1]
-        if out_features > self.out_features:
-            output = output[..., : self.out_features]
-        return output
+    
 
 
        
