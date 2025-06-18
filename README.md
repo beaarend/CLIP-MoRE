@@ -38,3 +38,13 @@ python3 main.py <args not defined>
 - [ ] MultiHeadAttention module uses linear layer, so as long as the linear layer is done, so is the MHA module
 - [ ] Replace layers using apply_monarch_layers
 - [ ] Test only using OxfordFlowers for now
+
+### Thoughts
+
+I need to create blockdiagonal1 and blkdiag2 to actually calculate the monarch matrixes
+output = dense.forward(x) + monarch_linear.forward(x)
+in_features & out_features = mha.embed_dim || => vit-b-32 = 768
+
+are we able to use triton kernel? I THINK SO?
+n_blocks = 4 in the original paper > Empirically, performance drops drastically when N>4
+r_blk = 2?

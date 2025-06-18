@@ -4,9 +4,7 @@ import torchvision.transforms as transforms
 from src.clip_architectures import OpenCLIP
 from datasets import build_dataset
 from datasets.utils import build_data_loader
-from training import run_more_training
-
-
+from training import run_monarch_training
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -18,6 +16,10 @@ def main():
     parser.add_argument("--dataset", type=str, default="oxford_flowers", help="Dataset to use")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for data loader")
     parser.add_argument("--shots", type=int, default=4, help="Number of shots for few-shot learning")
+
+    parser.add_argument("--num_blocks", type=int, default=12, help="Number of blocks in the model")
+    parser.add_argument("--dim_blocks", type=int, default=512, help="Dimension of the blocks in the model")
+    parser.add_argument("--rank_blocks", type=int, default=8, help="Rank of the blocks in the model")
 
     args = parser.parse_args()
 
@@ -38,14 +40,12 @@ def main():
     train_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(p=0.5),
-
-
             transforms.ToTensor(),
             transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
     ])
     train_loader = build_data_loader(data_source=dataset.train_x, batch_size=args.batch_size, tfm=train_transform, is_train=True, shuffle=True, num_workers=4)
 
-    run_more_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader)
+    run_monarch_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader)
 
 if __name__ == "__main__":
     main()
