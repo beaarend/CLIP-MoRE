@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.nn.init as init
 
 import math
 from typing import Optional, List
@@ -25,14 +26,26 @@ def set_param(curr_mod, name, param=None, mode='update'):
                 p = getattr(curr_mod, name)
                 return p
 
+
+#Need to check if this must be implemented here or in the MonarchLayer
+_DEFAULT_CONFIG = {
+    "nblocks": 4,
+    "blk_r": 4,
+    "blk_sz": None,
+    "square": False,
+    "adapter": True,
+}
+
 class LoRALayer(nn.Module): #Provisory Name
     def __init__(
         self, 
         r: int, 
         in_features, #SL
         out_features, #SL
+        nblocks,
         fan_in_fan_out: bool = False,
         dropout_rate: float = 0,
+        peft_config: dict = _DEFAULT_CONFIG,
         bias=None, #SL
         device=None, #SL
         dtype=None, #SL
@@ -40,54 +53,91 @@ class LoRALayer(nn.Module): #Provisory Name
     ):
         factory_kwargs = {"device": device, "dtype": dtype} #SL
         super().__init__() #SL
-        self.r = r
         self.in_features = in_features #SL
         self.out_features = out_features #SL
+        align_factor = self.out_features / self.in_features
+
         self.dropout_rate = dropout_rate
+        self.nblocks = nblocks
+
+        #Parameters needed for "reset_parameters" function
+        self.blk_r = peft_config["blk_r"] if "blk_r" not in kwargs else kwargs["blk_r"]
+        self.blk_sz = peft_config["blk_sz"] if "blk_sz" not in kwargs else kwargs["blk_sz"]
+        self.in_blksz = self.blk_sz
+        self.out_blksz = math.ceil(self.in_blksz * align_factor)
+        self.as_adapter = peft_config["adapter"] and kwargs.pop("as_adapter", peft_config["adapter"])
+        self.use_scaler = peft_config.get("scaler", False)
+        self.lora_style_init = peft_config.get("lora_style_init", False)
         # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
         self.fan_in_fan_out = fan_in_fan_out
         # define params that require LoRA {'param_name': 'lora_name'}
         self.params_with_lora = {}
 
-    def register_lora_param(self):
-        r"""Register LoRA matrix"""
-        for param_name, lora_name in self.params_with_lora.items():
-            assert len(eval(f'self.{param_name}').size()) == 2
-            self.register_parameter(f'{lora_name}_lora_A', 
-                nn.Parameter(eval(f'self.{param_name}').new_zeros((self.r, eval(f'self.{param_name}').size()[1])))
-                )
-            self.register_parameter(f'{lora_name}_lora_B', 
-                nn.Parameter(eval(f'self.{param_name}').new_zeros((eval(f'self.{param_name}').size()[0], self.r)))
-                )
-                
-            eval(f'self.{param_name}').requires_grad = False
+        # Use square blocks if testing block size trade-offs
+        if peft_config["square"]:
+            self.blk_r = self.in_blksz
 
-    def init_lora_param(self):
-        for param_name, lora_name in self.params_with_lora.items():
-            if hasattr(self, f'{lora_name}_lora_A'):
-                # initialize A the same way as the default for nn.Linear and B to zero
-                nn.init.kaiming_uniform_(eval(f'self.{lora_name}_lora_A'), a=math.sqrt(5))
-                nn.init.zeros_(eval(f'self.{lora_name}_lora_B'))  
+         # Init block-diagonal monarch factors
+        self.blkdiag1 = nn.Parameter(
+            torch.zeros(
+                self.nblocks, self.blk_r, self.in_blksz, device=self.device, dtype=dtype
+            )  # (nblocks, r * nblocks , in_features / nblocks)
+        )
+        self.blkdiag2 = nn.Parameter(
+            torch.zeros(
+                self.nblocks, self.out_blksz, self.blk_r, device=self.device, dtype=dtype
+            )  # (nblocks, out_features / nblocks, r * nblocks)
+        )
+        # Subclasses may override {in,out}_features_extended
+        if not hasattr(self, "in_features"):
+            self.in_features = in_features
+        if not hasattr(self, "out_features"):
+            self.out_features = out_features
 
+        # set bias
+        if bias is None:
+            self.bias = nn.Parameter(torch.zeros(out_features, **factory_kwargs))
+        elif isinstance(bias, torch.Tensor):
+            assert bias.shape == (out_features,), f"bias shape {bias.shape} is not (out_features,)"
+            self.bias = nn.Parameter(bias)
+        else:
+            self.register_parameter("bias", None)
+
+
+    def reset_parameters(self) -> None:
+        """
+        Initialize block-diagonal weights and biases
+        """
+        monarch_factors = [self.blkdiag1]
+        if self.use_scaler or not self.as_adapter:
+            monarch_factors.append(self.blkdiag2)  # zero init the scaler only
+
+        if self.lora_style_init:
+            lora_rank = 4
+            lora_A = torch.zeros(lora_rank, self.in_features)
+            self.set_weights_from_dense_init(lora_A, rank=self.blk_r)
+            # zero out 2nd monarch factor to start training from checkpoint
+            self.blkdiag2.data.zero_()
+        else:
+            for blkdiag in monarch_factors:
+                # init.kaiming_uniform_(blkdiag, a=math.sqrt(5)) # sqrt(5) should cancel "gain" out and give uniform(-1 / std, 1 / std)
+                ## Mimic init.kaiming_uniform but only on each block: p of (k, q, p) instead of q * p
+                ## https://github.com/pytorch/pytorch/blob/main/torch/nn/modules/linear.py
+                fan_in = blkdiag.shape[-1]
+                gain = init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
+                std = gain / math.sqrt(fan_in)
+                bound = math.sqrt(3.0) * std
+                ## Calculate uniform bounds from standard deviation
+                with torch.no_grad():
+                    blkdiag.uniform_(-bound, bound)
+        self.reset_parameters_bias()
+
+    
     def transpose(self, w: torch.Tensor):
         return w.transpose(0, 1) if self.fan_in_fan_out else w
-
-    # def merge_BA(self, param_name: str):
-    #     lora_name = self.params_with_lora[param_name]
-    #     return self.transpose((eval(f'self.{lora_name}_lora_B') @ eval(f'self.{lora_name}_lora_A')).view(eval(f'self.{param_name}').shape))
-
     
-   
     
-    # def merge_lora_param(self):
-    #     r"""p_new = p + scaling * B @ A and keep differentiable to A and B"""
-    #     for param_name, lora_name in self.params_with_lora.items():
-    #         p = set_param(self, param_name, mode='get')
-    #         # detach() is very important here
-            
-    #         p_new = p.detach() + self.merge_BA(param_name) * self.scaling
-    #         set_param(self, param_name, param=p_new, mode='update')
-
+    #Need to understand this part better
     def add_lora_data(self):
         r"""NOT differentiable"""
         for param_name, lora_name in self.params_with_lora.items():
@@ -99,20 +149,15 @@ class LoRALayer(nn.Module): #Provisory Name
             eval(f'self.{param_name}').data -= self.merge_BA(param_name) * self.scaling
             
     
-    #This was the original LoRA implementation, but I think it's not needed for Monarch
-    #       Mark the weight as unmerged
-    #       self.merged = False
+
+
     def lora_train(self, mode: bool = True):
         if mode:
-            if self.merged and self.r > 0:
-            # Make sure that the weights are not merged
+            if self.blk_r > 0:
                 self.sub_lora_data()
-            self.merged = False
         else:
-            if not self.merged and self.r > 0:
-            # Merge the weights and mark it
+            if self.blk_r > 0:
                 self.add_lora_data()
-            self.merged = True 
 # linear lora
 # change lora_layer to more_layer => basically structured linear here
 # class StructuredLinear(nn.Module):
