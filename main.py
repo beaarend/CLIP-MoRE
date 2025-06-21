@@ -12,19 +12,23 @@ def main():
 
     parser = argparse.ArgumentParser(description="OpenCLIP Model Loader")
     parser.add_argument("--model", type=str, default="open_clip", help="Model to load")
-    parser.add_argument("--backbone", type=str, default="ViT-B-32", help="Backbone model to use")
+    parser.add_argument("--backbone", type=str, default="ViT-B/32", help="Backbone model to use")
     parser.add_argument("--dataset", type=str, default="oxford_flowers", help="Dataset to use")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for data loader")
     parser.add_argument("--shots", type=int, default=4, help="Number of shots for few-shot learning")
+    parser.add_argument('--position', type=str, default='all', choices=['bottom', 'mid', 'up', 'half-up', 'half-bottom', 'all', 'top3'], help='where to put the LoRA modules')
+    parser.add_argument('--encoder', type=str, choices=['text', 'vision', 'both'], default='both')
+    parser.add_argument('--params', metavar='N', type=str, nargs='+', default=['q', 'k', 'v'], help='list of attention matrices where putting a LoRA') 
+    parser.add_argument('--dropout_rate', default=0.25, type=float, help='dropout rate applied before the LoRA module')
 
     parser.add_argument("--num_blocks", type=int, default=12, help="Number of blocks in the model")
     parser.add_argument("--dim_blocks", type=int, default=512, help="Dimension of the blocks in the model")
-    parser.add_argument("--rank_blocks", type=int, default=8, help="Rank of the blocks in the model")
+    parser.add_argument("--block_rank", type=int, default=8, help="Rank of the blocks in the model")
 
     args = parser.parse_args()
 
-    if args.model != "open_clip" or args.backbone != "ViT-B-32":
-        raise ValueError("Currently, only 'OpenCLIP' model with 'ViT-B-32' backbone is supported.")
+    if args.model != "open_clip" or args.backbone != "ViT-B/32":
+        raise ValueError("Currently, only 'OpenCLIP' model with 'ViT-B/32' backbone is supported.")
     
     model = OpenCLIP(device)
     model.load_model()

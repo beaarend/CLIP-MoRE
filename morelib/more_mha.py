@@ -5,17 +5,16 @@ This code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from morelib.layers import BaseLayer, MonarchLayer
 
-# import MoRELayer and LinearMoRE from lib.layers
-
-class PlainMultiheadAttentionLoRA(nn.Module):
+class PlainMultiheadAttentionMoRE(nn.Module):
     def __init__(
             self,
             existing_mha: nn.MultiheadAttention,
-            enable_lora: list = ['q', 'k', 'v', 'o'],
-            r: int = 0, 
-            lora_alpha: int = 1, 
-            dropout_rate:float = 0.,
+            num_blocks: int,
+            block_rank: int,
+            enable_monarch: list = ['q', 'k', 'v', 'o'], 
+            dropout_rate: float = 0.0,
             **kwargs
         ):
         super().__init__()
@@ -61,38 +60,30 @@ class PlainMultiheadAttentionLoRA(nn.Module):
                 self.proj.bias.data.copy_(existing_mha.out_proj.bias.data)
 
         self.scaled_dot_product_attention = F.scaled_dot_product_attention
-        
-        # only change here should be initializating a MoRE layer instead of LoRA layer!!!!
 
-        # LoRALayer.__init__(self, r=r, lora_alpha=lora_alpha, dropout_rate=dropout_rate)
-        # init the default MoRELayer using the parameters
-        
-        # Init qkv as a new MoRE linear layer 
-        # for item in enable_lora:
-        #     if item == 'q':
-        #         self.q_proj = LinearLoRA(self.q_proj,
-        #                                  r=r,
-        #                                  lora_alpha=lora_alpha,
-        #                                  fan_in_fan_out=False,
-        #                                  dropout_rate = dropout_rate)
-        #     elif item == 'k':
-        #         self.k_proj = LinearLoRA(self.k_proj,
-        #                                  r=r,
-        #                                  lora_alpha=lora_alpha,
-        #                                  fan_in_fan_out=False,
-        #                                  dropout_rate = dropout_rate)
-        #     elif item == 'v':
-        #         self.v_proj = LinearLoRA(self.v_proj,
-        #                                  r=r,
-        #                                  lora_alpha=lora_alpha,
-        #                                  fan_in_fan_out=False,
-        #                                  dropout_rate = dropout_rate)
-        #     elif item == 'o':
-        #         self.proj = LinearLoRA(self.proj,
-        #                                  r=r,
-        #                                  lora_alpha=lora_alpha,
-        #                                  fan_in_fan_out=False,
-        #                                  dropout_rate = dropout_rate)
+        BaseLayer.__init__(self, num_blocks=num_blocks, block_rank=block_rank, dropout_rate=dropout_rate)
+
+        for item in enable_monarch:
+            if item == 'q':
+                self.q_proj = MonarchLayer(self.q_proj,
+                                         num_blocks=num_blocks,
+                                         block_rank=block_rank,
+                                         dropout_rate = dropout_rate)
+            elif item == 'k':
+                self.k_proj = MonarchLayer(self.k_proj,
+                                         num_blocks=num_blocks,
+                                         block_rank=block_rank,
+                                         dropout_rate = dropout_rate)
+            elif item == 'v':
+                self.v_proj = MonarchLayer(self.v_proj,
+                                         num_blocks=num_blocks,
+                                         block_rank=block_rank,
+                                         dropout_rate = dropout_rate)
+            elif item == 'o':
+                self.proj = MonarchLayer(self.proj,
+                                         num_blocks=num_blocks,
+                                         block_rank=block_rank,
+                                         dropout_rate = dropout_rate)
         
     def forward_module(
             self,

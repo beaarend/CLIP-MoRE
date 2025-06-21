@@ -26,16 +26,15 @@ def set_param(curr_mod, name, param=None, mode='update'):
                 return p
 
 class BaseLayer():
-    def __init__(self, in_features, out_features, num_blocks, block_size, block_rank):
-        self.in_features = in_features
-        self.out_features = out_features
+    def __init__(self, num_blocks, block_rank, block_size = None, dropout_rate: float = 0.0):
         self.num_blocks = num_blocks
-        self.block_size = block_size
         self.block_rank = block_rank
+        self.dropout_rate = dropout_rate
+        self.block_size = block_size if block_size is not None else 512  # Default block size
 
     def register_monarch_param(self):
         """Register MoRe block-diagonal matrices for each adapted weight."""
-        print("Registering Monarch parameters for block-diagonal matrices.")
+        # print("Registering Monarch parameters for block-diagonal matrices.")
 
         for param_name, monarch_name in self.params_with_monarch.items():
             base_param = getattr(self, param_name)
@@ -44,13 +43,13 @@ class BaseLayer():
             self.register_parameter(
                 f'{monarch_name}_blkdiag1',
                 nn.Parameter(torch.empty(
-                    self.nblocks, self.blk_r, self.in_blksz
+                    self.num_blocks, self.block_rank, self.block_size
                 ))
             )
             self.register_parameter(
                 f'{monarch_name}_blkdiag2',
                 nn.Parameter(torch.empty(
-                    self.nblocks, self.out_blksz, self.blk_r,
+                    self.num_blocks, self.block_rank, self.block_size
                 ))
             )
             
@@ -59,7 +58,7 @@ class BaseLayer():
 
     def init_monarch_param(self, init_type):
         """Initialize the MoRe block-diagonal matrices."""
-        print(f"Initializing Monarch parameters with {init_type} method.")
+        # print(f"Initializing Monarch parameters with {init_type} method.")
 
         for param_name, monarch_name in self.params_with_monarch.items():
             blkdiag1 = getattr(self, f'{monarch_name}_blkdiag1')
@@ -81,10 +80,12 @@ class BaseLayer():
             else:
                 raise ValueError(f"Unsupported initialization type: {init_type}")
 
-class MonarchLayer(nn.Linear):
-    def __init__(self, num_blocks: int, block_rank: int, existing_linear = nn.Linear, dropout_rate: float = 0.0):
+class MonarchLayer(nn.Linear, BaseLayer):
+    def __init__(self, existing_linear, num_blocks: int, block_rank: int, dropout_rate: float = 0.0):
         self.in_features = existing_linear.in_features
         self.out_features = existing_linear.out_features
+        self.num_blocks = num_blocks
+        self.block_rank = block_rank
         self.monarch_impl = monarch_kernel
         self.block_size = int(math.ceil(self.in_features / self.num_blocks))
         self.merged = False
@@ -95,24 +96,14 @@ class MonarchLayer(nn.Linear):
         )
         # Throw away blocks that are fully padded
         if ((self.num_blocks * self.block_size) > self.in_features):
-            print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are larger than in_features {self.in_features}. Adjusting num_blocks.")
+            # print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are larger than in_features {self.in_features}. Adjusting num_blocks.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
         elif ((self.num_blocks * self.block_size) < self.in_features):
-            print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are smaller than in_features {self.in_features}. Adjusting block_size.")
+            # print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are smaller than in_features {self.in_features}. Adjusting block_size.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
 
         self.load_state_dict(existing_linear.state_dict())
-        BaseLayer.__init__(self, in_features, out_features, num_blocks, block_size, block_rank)
-
-        """FUNCTIONS NEEDED IN THE BASE LAYER!!!!
-        #  ####### dict with the correct names 
-        #  ######### creates monarch parameters -> diagonal matrices
-        # ) ############ kaiming init or zero, read paper
-        # self.weight.data = self.transpose(self.weight.data) fan in fan out
-
-        # Preprocess and postprocess might not be needed because CLIP dimensions are both fixed and the same value, but still...
-        # monarch_adjustment !
-        """
+        BaseLayer.__init__(self, num_blocks, block_rank, self.block_size, dropout_rate)
 
         self.params_with_monarch = {'weight': 'w'}
         self.register_monarch_param()
@@ -151,15 +142,7 @@ class MonarchLayer(nn.Linear):
         """
         Forward pass of the Monarch layer.
         """
-        # Get the Monarch matrices for the weight parameter
-        blkdiag1 = self._get_monarch_param('weight')
-        blkdiag2 = self._get_monarch_param('weight')
 
-        # Perform the forward pass using the Monarch implementation
-        return self.monarch_forward(x, blkdiag1, blkdiag2, use_triton=True)
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        
         original_output = super().forward(x)
 
         if not self.merged:
@@ -216,7 +199,7 @@ class MonarchLayer(nn.Linear):
         blkdiag2 = getattr(self, f'{monarch_name}_blkdiag2')
 
         identity_matrix = torch.eye(self.in_features)
-        dense_monarch_matrix = self.monarch_forward(identity_matrix, blkdiag1, blkdiag2 use_triton=False)
+        dense_monarch_matrix = self.monarch_forward(identity_matrix, blkdiag1, blkdiag2)
 
         return dense_monarch_matrix.T
     

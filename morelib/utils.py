@@ -5,7 +5,8 @@ import torch.nn as nn
 
 from typing import Dict
 
-# from .layers import LoRALayer, PlainMultiheadAttentionLoRA
+from morelib.layers import BaseLayer, MonarchLayer
+from morelib.more_mha import PlainMultiheadAttentionMoRE
 
 INDEX_POSITIONS_TEXT = {
     'top1': [11],
@@ -30,9 +31,9 @@ INDEX_POSITIONS_VISION = {
 }
 
 
-def mark_only_more_as_trainable(model: nn.Module, bias: str = 'none') -> None:
+def mark_only_monarch_as_trainable(model: nn.Module, bias: str = 'none') -> None:
     for n, p in model.named_parameters():
-        if 'more_' not in n:
+        if 'monarch_' not in n:
             p.requires_grad = False
     if bias == 'none':
         return
@@ -40,23 +41,23 @@ def mark_only_more_as_trainable(model: nn.Module, bias: str = 'none') -> None:
         for n, p in model.named_parameters():
             if 'bias' in n:
                 p.requires_grad = True
-    # elif bias == 'more_only':
-    #     for m in model.modules():
-    #         if isinstance(m, LoRALayer) and \
-    #                 hasattr(m, 'bias') and \
-    #                 m.bias is not None:
-    #             m.bias.requires_grad = True
+    elif bias == 'monarch_only':
+        for m in model.modules():
+            if isinstance(m, MonarchLayer) and \
+                    hasattr(m, 'bias') and \
+                    m.bias is not None:
+                m.bias.requires_grad = True
     else:
         raise NotImplementedError
 
 
-def more_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Tensor]:
+def monarch_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Tensor]:
     my_state_dict = model.state_dict()
     if bias == 'none':
-        return {k: my_state_dict[k] for k in my_state_dict if 'more_' in k}
+        return {k: my_state_dict[k] for k in my_state_dict if 'blkdiag_' in k}
     elif bias == 'all':
         return {k: my_state_dict[k] for k in my_state_dict if 'more_' in k or 'bias' in k}
-    elif bias == 'more_only':
+    elif bias == 'monarch_only':
         to_return = {}
         for k in my_state_dict:
             if 'more_' in k:
@@ -69,7 +70,7 @@ def more_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Ten
         raise NotImplementedError
 
 
-def get_more_parameters(model, bias='none'):
+def get_monarch_parameters(model, bias='none'):
     params = []
     for name, param in model.named_parameters():
         if bias == 'none':
@@ -78,7 +79,7 @@ def get_more_parameters(model, bias='none'):
         elif bias == 'all':
             if 'more_' in name or 'bias' in name:
                 params.append(param)
-        elif bias == 'more_only':
+        elif bias == 'monarch_only':
             if 'more_' in name:
                 params.append(param)
                 bias_name = name.split('more_')[0] + 'bias'
@@ -90,133 +91,34 @@ def get_more_parameters(model, bias='none'):
     return params
 
 
-# def apply_more(args, clip_model):
-#     list_more_layers = []
-#     if args.encoder == 'text' or args.encoder == 'both':
-#         indices = INDEX_POSITIONS_TEXT[args.position]
-#         text_encoder = clip_model.transformer
-#         for i, block in enumerate(text_encoder.resblocks):
-#             print(f"Residual Attention Block {i}: {block}")
-#             if i in indices:
-#                 for name, submodule in block.named_children():
-#                     if isinstance(submodule, nn.MultiheadAttention):
-#                         new_multi_head_more = PlainMultiheadAttentionLoRA(
-#                             submodule, enable_more=args.params, r=args.r, more_alpha=args.alpha, dropout_rate=args.dropout_rate)
-#                         setattr(block, name, new_multi_head_more)
-#                         list_more_layers.append(new_multi_head_more)
+def apply_monarch(args, clip_model):
+    list_monarch_layers = []
+    print("entrei na apply_monarch")
+    if args.encoder == 'text' or args.encoder == 'both':
+        indices = INDEX_POSITIONS_TEXT[args.position]
+        text_encoder = clip_model.backbone.transformer
+        for i, block in enumerate(text_encoder.resblocks):
+            print(f"Residual Attention Block {i}: {block}")
+            if i in indices:
+                for name, submodule in block.named_children():
+                    if isinstance(submodule, nn.MultiheadAttention):
+                        print(f"Applying MoRE to {name} in text encoder block {i}")
+                        new_multi_head_monarch = PlainMultiheadAttentionMoRE(
+                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                        setattr(block, name, new_multi_head_monarch)
+                        list_monarch_layers.append(new_multi_head_monarch)
 
-#     if args.encoder == 'vision' or args.encoder == 'both':
-#         indices = INDEX_POSITIONS_VISION[args.backbone][args.position]
-#         vision_encoder = clip_model.visual.transformer
-#         for i, block in enumerate(vision_encoder.resblocks):
-#             print(f"Residual Attention Block {i}: {block}")
-#             if i in indices:
-#                 for name, submodule in block.named_children():
-#                     if isinstance(submodule, nn.MultiheadAttention):
-#                         new_multi_head_more = PlainMultiheadAttentionLoRA(
-#                             submodule, enable_more=args.params, r=args.r, more_alpha=args.alpha, dropout_rate=args.dropout_rate)
-#                         setattr(block, name, new_multi_head_more)
-#                         list_more_layers.append(new_multi_head_more)
-#     return list_more_layers
-
-
-def save_more(args, list_more_layers):
-    weights = {}
-    for i, layer in enumerate(list_more_layers):
-        layer_weights = {}
-        if 'q' in args.params:
-            layer_weights['q_proj'] = {
-                'w_lora_A': layer.q_proj.w_lora_A.data,
-                'w_lora_B': layer.q_proj.w_lora_B.data
-            }
-        if 'k' in args.params:
-            layer_weights['k_proj'] = {
-                'w_lora_A': layer.k_proj.w_lora_A.data,
-                'w_lora_B': layer.k_proj.w_lora_B.data
-            }
-        if 'v' in args.params:
-            layer_weights['v_proj'] = {
-                'w_lora_A': layer.v_proj.w_lora_A.data,
-                'w_lora_B': layer.v_proj.w_lora_B.data
-            }
-        if 'o' in args.params:
-            layer_weights['proj'] = {
-                'w_lora_A': layer.proj.w_lora_A.data,
-                'w_lora_B': layer.proj.w_lora_B.data
-            }
-
-        weights[f'layer_{i}'] = layer_weights
-
-    metadata = {
-        'r': args.r,
-        'alpha': args.alpha,
-        'encoder': args.encoder,
-        'params': args.params,
-        'position': args.position
-    }
-
-    save_data = {
-        'weights': weights,
-        'metadata': metadata
-    }
-
-    # to manage names like ViT-B/16
-    backbone = args.backbone.replace('/', '').replace('-', '').lower()
-    save_dir = f'{args.save_path}/{backbone}/{args.dataset}/{args.shots}shots/seed{args.seed}'
-    os.makedirs(save_dir, exist_ok=True)
-
-    save_path = f'{save_dir}/{args.filename}.pt'
-    torch.save(save_data, save_path)
-    print(f'LoRA weights saved to {save_path}')
-
-
-def load_lora(args, list_lora_layers):
-    # to manage names like ViT-B/16
-    backbone = args.backbone.replace('/', '').replace('-', '').lower()
-    load_path = f'{args.save_path}/{backbone}/{args.dataset}/{args.shots}shots/seed{args.seed}/{args.filename}.pt'
-
-    if not os.path.exists(load_path):
-        raise FileNotFoundError(f'File {load_path} does not exist.')
-
-    loaded_data = torch.load(load_path)
-
-    metadata = loaded_data['metadata']
-    if metadata['r'] != args.r:
-        raise ValueError(
-            f"r mismatch: expected {args.r}, found {metadata['r']}")
-    if metadata['alpha'] != args.alpha:
-        raise ValueError(
-            f"alpha mismatch: expected {args.alpha}, found {metadata['alpha']}")
-    if metadata['encoder'] != args.encoder:
-        raise ValueError(
-            f"Encoder mismatch: expected {args.encoder}, found {metadata['encoder']}")
-    if metadata['params'] != args.params:
-        raise ValueError(
-            f"Params mismatch: expected {args.params}, found {metadata['params']}")
-    if metadata['position'] != args.position:
-        raise ValueError(
-            f"Position mismatch: expected {args.position}, found {metadata['position']}")
-
-    weights = loaded_data['weights']
-    for i, layer in enumerate(list_lora_layers):
-        layer_weights = weights[f'layer_{i}']
-        if 'q' in args.params and 'q_proj' in layer_weights:
-            layer.q_proj.w_lora_A.data.copy_(
-                layer_weights['q_proj']['w_lora_A'])
-            layer.q_proj.w_lora_B.data.copy_(
-                layer_weights['q_proj']['w_lora_B'])
-        if 'k' in args.params and 'k_proj' in layer_weights:
-            layer.k_proj.w_lora_A.data.copy_(
-                layer_weights['k_proj']['w_lora_A'])
-            layer.k_proj.w_lora_B.data.copy_(
-                layer_weights['k_proj']['w_lora_B'])
-        if 'v' in args.params and 'v_proj' in layer_weights:
-            layer.v_proj.w_lora_A.data.copy_(
-                layer_weights['v_proj']['w_lora_A'])
-            layer.v_proj.w_lora_B.data.copy_(
-                layer_weights['v_proj']['w_lora_B'])
-        if 'o' in args.params and 'proj' in layer_weights:
-            layer.proj.w_lora_A.data.copy_(layer_weights['proj']['w_lora_A'])
-            layer.proj.w_lora_B.data.copy_(layer_weights['proj']['w_lora_B'])
-
-    print(f'LoRA weights loaded from {load_path}')
+    if args.encoder == 'vision' or args.encoder == 'both':
+        indices = INDEX_POSITIONS_VISION[args.backbone][args.position]
+        vision_encoder = clip_model.backbone.visual.transformer
+        for i, block in enumerate(vision_encoder.resblocks):
+            print(f"Residual Attention Block {i}: {block}")
+            if i in indices:
+                for name, submodule in block.named_children():
+                    if isinstance(submodule, nn.MultiheadAttention):
+                        print(f"Applying MoRE to {name} in vision encoder block {i}")
+                        new_multi_head_monarch = PlainMultiheadAttentionMoRE(
+                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                        setattr(block, name, new_multi_head_monarch)
+                        list_monarch_layers.append(new_multi_head_monarch)
+    return list_monarch_layers
