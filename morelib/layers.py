@@ -25,7 +25,94 @@ def set_param(curr_mod, name, param=None, mode='update'):
                 p = getattr(curr_mod, name)
                 return p
 
+class LoRALayer(nn.Module): #Provisory Name
+    def __init__(
+        self, 
+        r: int, 
+        in_features, #SL
+        out_features, #SL
+        fan_in_fan_out: bool = False,
+        dropout_rate: float = 0,
+        bias=None, #SL
+        device=None, #SL
+        dtype=None, #SL
+        **kwargs, #SL
+    ):
+        factory_kwargs = {"device": device, "dtype": dtype} #SL
+        super().__init__() #SL
+        self.r = r
+        self.in_features = in_features #SL
+        self.out_features = out_features #SL
+        self.dropout_rate = dropout_rate
+        # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        self.fan_in_fan_out = fan_in_fan_out
+        # define params that require LoRA {'param_name': 'lora_name'}
+        self.params_with_lora = {}
 
+    def register_lora_param(self):
+        r"""Register LoRA matrix"""
+        for param_name, lora_name in self.params_with_lora.items():
+            assert len(eval(f'self.{param_name}').size()) == 2
+            self.register_parameter(f'{lora_name}_lora_A', 
+                nn.Parameter(eval(f'self.{param_name}').new_zeros((self.r, eval(f'self.{param_name}').size()[1])))
+                )
+            self.register_parameter(f'{lora_name}_lora_B', 
+                nn.Parameter(eval(f'self.{param_name}').new_zeros((eval(f'self.{param_name}').size()[0], self.r)))
+                )
+                
+            eval(f'self.{param_name}').requires_grad = False
+
+    def init_lora_param(self):
+        for param_name, lora_name in self.params_with_lora.items():
+            if hasattr(self, f'{lora_name}_lora_A'):
+                # initialize A the same way as the default for nn.Linear and B to zero
+                nn.init.kaiming_uniform_(eval(f'self.{lora_name}_lora_A'), a=math.sqrt(5))
+                nn.init.zeros_(eval(f'self.{lora_name}_lora_B'))  
+
+    def transpose(self, w: torch.Tensor):
+        return w.transpose(0, 1) if self.fan_in_fan_out else w
+
+    # def merge_BA(self, param_name: str):
+    #     lora_name = self.params_with_lora[param_name]
+    #     return self.transpose((eval(f'self.{lora_name}_lora_B') @ eval(f'self.{lora_name}_lora_A')).view(eval(f'self.{param_name}').shape))
+
+    
+   
+    
+    # def merge_lora_param(self):
+    #     r"""p_new = p + scaling * B @ A and keep differentiable to A and B"""
+    #     for param_name, lora_name in self.params_with_lora.items():
+    #         p = set_param(self, param_name, mode='get')
+    #         # detach() is very important here
+            
+    #         p_new = p.detach() + self.merge_BA(param_name) * self.scaling
+    #         set_param(self, param_name, param=p_new, mode='update')
+
+    def add_lora_data(self):
+        r"""NOT differentiable"""
+        for param_name, lora_name in self.params_with_lora.items():
+            eval(f'self.{param_name}').data += self.merge_BA(param_name) * self.scaling
+    
+    def sub_lora_data(self):
+        r"""NOT differentiable"""
+        for param_name, lora_name in self.params_with_lora.items():
+            eval(f'self.{param_name}').data -= self.merge_BA(param_name) * self.scaling
+            
+    
+    #This was the original LoRA implementation, but I think it's not needed for Monarch
+    #       Mark the weight as unmerged
+    #       self.merged = False
+    def lora_train(self, mode: bool = True):
+        if mode:
+            if self.merged and self.r > 0:
+            # Make sure that the weights are not merged
+                self.sub_lora_data()
+            self.merged = False
+        else:
+            if not self.merged and self.r > 0:
+            # Merge the weights and mark it
+                self.add_lora_data()
+            self.merged = True 
 # linear lora
 # change lora_layer to more_layer => basically structured linear here
 # class StructuredLinear(nn.Module):
