@@ -7,6 +7,7 @@ from typing import Dict
 
 from morelib.layers import BaseLayer, MonarchLayer
 from morelib.more_mha import PlainMultiheadAttentionMoRE
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 INDEX_POSITIONS_TEXT = {
     'top1': [11],
@@ -108,6 +109,7 @@ def apply_monarch(args, clip_model):
                         # print(f"Applying MoRE to {name} in text encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                        new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
                         list_monarch_layers.append(new_multi_head_monarch)
 
@@ -122,6 +124,7 @@ def apply_monarch(args, clip_model):
                         # print(f"Applying MoRE to {name} in vision encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                        new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
                         list_monarch_layers.append(new_multi_head_monarch)
     return list_monarch_layers

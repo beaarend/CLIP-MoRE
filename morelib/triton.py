@@ -289,7 +289,6 @@ def monarch_forward(
     # Do NOT use split-k + atomic here, which requires a round trip to HBM and cross-block sync
     for k in range(0, BLK1_IN, BLOCK_SIZE_K):
         w1_bfly = tl.load(w1_ptrs, boundary_check=(2, ), eviction_policy="evict_first", padding_option="zero").to(dtype)
-        print("DEBUG w1_bfly shape:", w1_bfly.shape) 
         w1_bfly = tl.trans(w1_bfly, (0, 2, 1))  # -> (n_blk, blk1_in, blk1_out)
         # w1_bfly = tl.trans(w1_bfly, (2,1,0))
         out1 += tl.dot(

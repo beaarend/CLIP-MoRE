@@ -6,6 +6,9 @@ import math
 from typing import Optional, List, Tuple
 
 from morelib.triton import monarch_kernel
+from morelib.blockdiag_butterfly_multiply import blockdiag_butterfly_multiply, single_monarch_mult
+device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def set_param(curr_mod, name, param=None, mode='update'):
     r"""Refer to https://github.com/Baijiong-Lin/MOML/blob/main/MTL/utils.py"""
@@ -32,7 +35,7 @@ class BaseLayer():
         self.dropout_rate = dropout_rate
         self.block_size = block_size if block_size is not None else 512  # Default block size
 
-    def register_monarch_param(self):
+    def register_monarch_param(self, dtype: torch.dtype):
         """Register MoRe block-diagonal matrices for each adapted weight."""
         # print("Registering Monarch parameters for block-diagonal matrices.")
 
@@ -43,13 +46,15 @@ class BaseLayer():
             self.register_parameter(
                 f'{monarch_name}_blkdiag1',
                 nn.Parameter(torch.empty(
-                    self.num_blocks, self.block_rank, self.block_size
+                    self.num_blocks, self.block_rank, self.block_size,
+                    device=device, dtype=dtype
                 ))
             )
             self.register_parameter(
                 f'{monarch_name}_blkdiag2',
                 nn.Parameter(torch.empty(
-                    self.num_blocks, self.block_size, self.block_rank
+                    self.num_blocks, self.block_size, self.block_rank,
+                    device=device, dtype=dtype
                 ))
             )
             
@@ -86,9 +91,14 @@ class MonarchLayer(nn.Linear, BaseLayer):
         self.out_features = existing_linear.out_features
         self.num_blocks = num_blocks
         self.block_rank = block_rank
-        self.monarch_impl = monarch_kernel
+        # self.monarch_impl = monarch_kernel
+        self.monarch_impl = blockdiag_butterfly_multiply
         self.block_size = int(math.ceil(self.in_features / self.num_blocks))
         self.merged = False
+        self.device = device
+        self.dtype = existing_linear.weight.dtype
+
+        print(f"Init MonarchLayer => Device: {self.device}, Dtype: {self.dtype}")
 
         super().__init__(
             in_features=existing_linear.in_features, 
@@ -106,7 +116,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
         BaseLayer.__init__(self, num_blocks, block_rank, self.block_size, dropout_rate)
 
         self.params_with_monarch = {'weight': 'w'}
-        self.register_monarch_param()
+        self.register_monarch_param(self.dtype)
         self.init_monarch_param('zero')
 
         if dropout_rate > 0:
@@ -119,7 +129,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
         Forward pass using two monarch factors. Now accepts the factors as arguments.
         """
         monarch_impl = monarch_kernel
-        output = monarch_impl(self.preprocess(x), blkdiag1, blkdiag2)
+        output = self.monarch_impl(self.preprocess(x), blkdiag1, blkdiag2)
         return self.dropout(self.postprocess(output))
     
     def train(self, mode: bool = True):
@@ -198,7 +208,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
         blkdiag1 = getattr(self, f'{monarch_name}_blkdiag1')
         blkdiag2 = getattr(self, f'{monarch_name}_blkdiag2')
 
-        identity_matrix = torch.eye(self.in_features)
+        identity_matrix = torch.eye(self.in_features, device=self.device, dtype=self.dtype)
         dense_monarch_matrix = self.monarch_forward(identity_matrix, blkdiag1, blkdiag2)
 
         return dense_monarch_matrix.T

@@ -39,9 +39,17 @@ def main():
     if args.dataset != "oxford_flowers":
         raise ValueError("Currently, only 'oxford_flowers' datasets are supported.")
     
+    eval_transform = transforms.Compose([
+        transforms.Resize(224, interpolation=transforms.InterpolationMode.BICUBIC),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=(0.48145466, 0.4578275, 0.40821073), std=(0.26862954, 0.26130258, 0.27577711))
+    ])
+    
     dataset = build_dataset(args.dataset, root_path="", shots=args.shots)
-    val_loader = build_data_loader(dataset.val, batch_size=args.batch_size, shuffle=False, num_workers=4)
-    test_loader = build_data_loader(dataset.test, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    val_loader = build_data_loader(dataset.val, batch_size=args.batch_size, tfm=eval_transform, is_train=False, shuffle=False, num_workers=4)
+    test_loader = build_data_loader(dataset.test, batch_size=args.batch_size, tfm=eval_transform, is_train=False, shuffle=False, num_workers=4)
+
 
     train_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),

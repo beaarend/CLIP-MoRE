@@ -57,7 +57,6 @@ class BlockdiagMultiply(torch.autograd.Function):
 
 single_monarch_mult = BlockdiagMultiply.apply
 
-
 class BlockdiagButterflyMultiply(torch.autograd.Function):
     """This is a faster implementation, with careful memory copies for the fastest
     bmm performance.
@@ -90,6 +89,11 @@ class BlockdiagButterflyMultiply(torch.autograd.Function):
         x_reshaped = x.reshape(seq_dim, nblocks1, blk1_in).transpose(0, 1)
         out1 = torch.empty(nblocks1, seq_dim, blk1_out, device=x.device, dtype=x.dtype)
         # (nblocks1, seq_dim, blk1_in) @ (nblocks1, blk1_in, blk1_out)
+
+        print(f"DEBUG BMM Input Device: x_reshaped is on {x_reshaped.device}")
+        print(f"DEBUG BMM Weight Device: w1_bfly is on {w1_bfly.device}")
+        print(f"DEBUG BMM Output Buffer Device: out1 is on {out1.device}")
+
         out1 = torch.bmm(x_reshaped, w1_bfly.transpose(-1, -2), out=out1)  # -> (nblocks1, seq_dim, blk1_out)
         del x_reshaped
 
@@ -150,7 +154,6 @@ class BlockdiagButterflyMultiply(torch.autograd.Function):
 
 
 blockdiag_butterfly_multiply = BlockdiagButterflyMultiply.apply
-
 
 # Supports rectangular matrices
 def blockdiag_butterfly_multiply_reference(x, w1_bfly, w2_bfly, version=2):

@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-import tqdm
+from tqdm import tqdm
 from morelib.utils import apply_monarch, mark_only_monarch_as_trainable, get_monarch_parameters
 from src.utils import cls_acc, get_zero_shot_classifier
 
@@ -15,7 +15,7 @@ def evaluate_monarch(model, loader, text_features, device):
             images, target = images.to(device), target.to(device)
             
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-                image_features = model.encode_image(images)
+                image_features = model.backbone.encode_image(images)
                 image_features /= image_features.norm(dim=-1, keepdim=True)
 
                 # Calculate logits by multiplying with the pre-computed text features
