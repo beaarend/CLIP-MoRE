@@ -90,10 +90,6 @@ class BlockdiagButterflyMultiply(torch.autograd.Function):
         out1 = torch.empty(nblocks1, seq_dim, blk1_out, device=x.device, dtype=x.dtype)
         # (nblocks1, seq_dim, blk1_in) @ (nblocks1, blk1_in, blk1_out)
 
-        print(f"DEBUG BMM Input Device: x_reshaped is on {x_reshaped.device}")
-        print(f"DEBUG BMM Weight Device: w1_bfly is on {w1_bfly.device}")
-        print(f"DEBUG BMM Output Buffer Device: out1 is on {out1.device}")
-
         out1 = torch.bmm(x_reshaped, w1_bfly.transpose(-1, -2), out=out1)  # -> (nblocks1, seq_dim, blk1_out)
         del x_reshaped
 

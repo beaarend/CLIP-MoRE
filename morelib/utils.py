@@ -111,6 +111,7 @@ def apply_monarch(args, clip_model):
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
                         new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
+                        # setattr(submodule, name, new_multi_head_monarch)
                         list_monarch_layers.append(new_multi_head_monarch)
 
     if args.encoder == 'vision' or args.encoder == 'both':
@@ -126,5 +127,6 @@ def apply_monarch(args, clip_model):
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
                         new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
+                        # setattr(submodule, name, new_multi_head_monarch)
                         list_monarch_layers.append(new_multi_head_monarch)
     return list_monarch_layers

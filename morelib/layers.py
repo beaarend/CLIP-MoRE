@@ -98,8 +98,6 @@ class MonarchLayer(nn.Linear, BaseLayer):
         self.device = device
         self.dtype = existing_linear.weight.dtype
 
-        print(f"Init MonarchLayer => Device: {self.device}, Dtype: {self.dtype}")
-
         super().__init__(
             in_features=existing_linear.in_features, 
             out_features=existing_linear.out_features
