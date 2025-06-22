@@ -29,9 +29,6 @@ def set_param(curr_mod, name, param=None, mode='update'):
 
 #Need to check if this must be implemented here or in the MonarchLayer
 _DEFAULT_CONFIG = {
-    "nblocks": 4,
-    "blk_r": 4,
-    "blk_sz": None,
     "square": False,
     "adapter": True,
 }
@@ -39,10 +36,11 @@ _DEFAULT_CONFIG = {
 class LoRALayer(nn.Module): #Provisory Name
     def __init__(
         self, 
-        r: int, 
         in_features, #SL
         out_features, #SL
-        nblocks,
+        num_blocks,
+        block_size,
+        block_rank,
         fan_in_fan_out: bool = False,
         dropout_rate: float = 0,
         peft_config: dict = _DEFAULT_CONFIG,
@@ -58,11 +56,11 @@ class LoRALayer(nn.Module): #Provisory Name
         align_factor = self.out_features / self.in_features
 
         self.dropout_rate = dropout_rate
-        self.nblocks = nblocks
+        self.num_blocks = num_blocks
 
         #Parameters needed for "reset_parameters" function
-        self.blk_r = peft_config["blk_r"] if "blk_r" not in kwargs else kwargs["blk_r"]
-        self.blk_sz = peft_config["blk_sz"] if "blk_sz" not in kwargs else kwargs["blk_sz"]
+        self.blk_r = block_rank
+        self.blk_sz = block_size
         self.in_blksz = self.blk_sz
         self.out_blksz = math.ceil(self.in_blksz * align_factor)
         self.as_adapter = peft_config["adapter"] and kwargs.pop("as_adapter", peft_config["adapter"])
@@ -80,13 +78,13 @@ class LoRALayer(nn.Module): #Provisory Name
          # Init block-diagonal monarch factors
         self.blkdiag1 = nn.Parameter(
             torch.zeros(
-                self.nblocks, self.blk_r, self.in_blksz, device=self.device, dtype=dtype
-            )  # (nblocks, r * nblocks , in_features / nblocks)
+                self.num_blocks, self.blk_r, self.in_blksz, device=self.device, dtype=dtype
+            )  # (num_blocks, r * num_blocks , in_features / num_blocks)
         )
         self.blkdiag2 = nn.Parameter(
             torch.zeros(
-                self.nblocks, self.out_blksz, self.blk_r, device=self.device, dtype=dtype
-            )  # (nblocks, out_features / nblocks, r * nblocks)
+                self.num_blocks, self.out_blksz, self.blk_r, device=self.device, dtype=dtype
+            )  # (num_blocks, out_features / num_blocks, r * num_blocks)
         )
         # Subclasses may override {in,out}_features_extended
         if not hasattr(self, "in_features"):
