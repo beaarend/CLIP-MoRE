@@ -49,7 +49,7 @@ class BaseLayer():
             self.register_parameter(
                 f'{monarch_name}_blkdiag2',
                 nn.Parameter(torch.empty(
-                    self.num_blocks, self.block_rank, self.block_size
+                    self.num_blocks, self.block_size, self.block_rank
                 ))
             )
             
@@ -161,8 +161,8 @@ class MonarchLayer(nn.Linear, BaseLayer):
 
     def preprocess(self, x):
         x_in_features = x.shape[-1]
-        if x_in_features < self.nblocks * self.in_blksz:
-            x = F.pad(x, (0, self.nblocks * self.in_blksz - x_in_features))
+        if x_in_features < self.num_blocks * self.block_size:
+            x = F.pad(x, (0, self.num_blocks * self.block_size - x_in_features))
         return x
 
     def postprocess(self, output):
@@ -191,7 +191,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
             base_param = getattr(self, param_name)
             base_param.data -= adjustment
 
-    def _get_monarch_param(self, param_name: str) -> torch.Tensor:
+    def _get_monarch_matrix(self, param_name: str) -> torch.Tensor:
         """Get the Monarch matrix M for the given parameter name."""
 
         monarch_name = self.params_with_monarch[param_name]

@@ -145,7 +145,7 @@ def monarch_backward(
     dout = tl.load(dout_ptrs, boundary_check=(1, 2), eviction_policy="evict_first")
     # Compute dw2
     # (nblocks2, blk2_out, seq_dim) @ (nblocks2, seq_dim, blk1_out) -> (nblocks2, blk2_out, blk1_out)
-    dw2_bfly = tl.dot(dout.trans(0, 2, 1), out1)#, out_dtype=out1.dtype)
+    dw2_bfly = tl.dot(dout.trans((0, 2, 1)), out1)#, out_dtype=out1.dtype)
     if pid_n == 0:
         base_dw2 = tl.zeros((1, 1, 1), dtype=tl.int32) + dw2_bfly_ptr
         i = tl.arange(0, BLOCK_SIZE_M)[None, :, None]
@@ -178,7 +178,7 @@ def monarch_backward(
         
         x = tl.load(x_ptrs, boundary_check=(1, 2), eviction_policy="evict_first")
         # （nblocks2, blk2_in, seq_dim) @ (nblocks2, seq_dim, blk1_in) -> (nblocks2, blk2_in, blk1_in)
-        dw1_bfly = tl.dot(tl.trans(dout1, 0, 2, 1), x, out_dtype=dout1.dtype)
+        dw1_bfly = tl.dot(tl.trans(dout1, (0, 2, 1)), x, out_dtype=dout1.dtype)
         # Atomic add to global mem
         offs_n_current = offs_n
         offsets_dw1 = nblocks * stride_w1l + k_dw1 * stride_w1r + (offs_n_current + j_dw1) * stride_w1k
@@ -249,9 +249,11 @@ def monarch_forward(
     w1_ptrs = tl.make_block_ptr(
         w1_bfly_ptr,
         shape=(N_BLK, BLK1_OUT, BLK1_IN),
+        # shape=(N_BLK, BLK1_IN, BLK1_OUT),
         strides=(stride_w1l, stride_w1r, stride_w1k),
         offsets=(0, 0, 0),
         block_shape=(N_BLK, BLK1_OUT, BLOCK_SIZE_K),
+        # block_shape=(N_BLK, BLOCK_SIZE_K, BLK1_OUT),
         order=(2, 1, 0),
     )
 
@@ -287,7 +289,9 @@ def monarch_forward(
     # Do NOT use split-k + atomic here, which requires a round trip to HBM and cross-block sync
     for k in range(0, BLK1_IN, BLOCK_SIZE_K):
         w1_bfly = tl.load(w1_ptrs, boundary_check=(2, ), eviction_policy="evict_first", padding_option="zero").to(dtype)
-        w1_bfly = tl.trans(w1_bfly, 0, 2, 1)  # -> (n_blk, blk1_in, blk1_out)
+        print("DEBUG w1_bfly shape:", w1_bfly.shape) 
+        w1_bfly = tl.trans(w1_bfly, (0, 2, 1))  # -> (n_blk, blk1_in, blk1_out)
+        # w1_bfly = tl.trans(w1_bfly, (2,1,0))
         out1 += tl.dot(
             x, w1_bfly
         )  # (n_blk, seq_dim, blk1_in) @ (n_blk, blk1_in, blk1_out) -> (n_blk, seq_dim, blk1_out).
@@ -304,9 +308,9 @@ def monarch_forward(
     tl.store(out1_ptrs, out1, boundary_check=(1, ))
 
     w2_bfly = tl.load(w2_ptrs, boundary_check=(1, 2), padding_option="zero").to(dtype)
-    w2_bfly = tl.trans(w2_bfly, 0, 2, 1)  # -> (blk2_in, blk2_out)
+    w2_bfly = tl.trans(w2_bfly, (0, 2, 1))  # -> (blk2_in, blk2_out)
     out2 = tl.dot(out1, w2_bfly, out_dtype=dtype)  # (n_blk, seq_dim, blk1_out) @ (n_blk, blk2_in, blk2_out) -> (n_blk, seq_dim, blk2_out)
-    out2 = tl.trans(out2, 1, 2, 0)  # -> (seq_dim, blk2_out, n_blk)
+    out2 = tl.trans(out2, (1, 2, 0))  # -> (seq_dim, blk2_out, n_blk)
     tl.store(out2_ptrs, out2, boundary_check=(0, 1))
 
 

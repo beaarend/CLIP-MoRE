@@ -32,37 +32,40 @@ INDEX_POSITIONS_VISION = {
 
 
 def mark_only_monarch_as_trainable(model: nn.Module, bias: str = 'none') -> None:
-    for n, p in model.named_parameters():
-        if 'monarch_' not in n:
+    for n, p in model.backbone.named_parameters():
+        # print(f"Parameter: {n}")
+        if '_blkdiag' not in n:
             p.requires_grad = False
+            # print(f"Parameter {n} marked as non-trainable.")
     if bias == 'none':
         return
     elif bias == 'all':
-        for n, p in model.named_parameters():
+        for n, p in model.backbone.named_parameters():
             if 'bias' in n:
                 p.requires_grad = True
     elif bias == 'monarch_only':
-        for m in model.modules():
+        for m in model.backbone.modules():
             if isinstance(m, MonarchLayer) and \
                     hasattr(m, 'bias') and \
                     m.bias is not None:
                 m.bias.requires_grad = True
+        # print("Marked only MoRE layers and their biases as trainable.")
     else:
         raise NotImplementedError
 
 
 def monarch_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Tensor]:
-    my_state_dict = model.state_dict()
+    my_state_dict = model.backbone.state_dict()
     if bias == 'none':
-        return {k: my_state_dict[k] for k in my_state_dict if 'blkdiag_' in k}
+        return {k: my_state_dict[k] for k in my_state_dict if '_blkdiag' in k}
     elif bias == 'all':
-        return {k: my_state_dict[k] for k in my_state_dict if 'more_' in k or 'bias' in k}
+        return {k: my_state_dict[k] for k in my_state_dict if '_blkdiag' in k or 'bias' in k}
     elif bias == 'monarch_only':
         to_return = {}
         for k in my_state_dict:
             if 'more_' in k:
                 to_return[k] = my_state_dict[k]
-                bias_name = k.split('more_')[0]+'bias'
+                bias_name = k.split('_blkdiag')[0]+'bias'
                 if bias_name in my_state_dict:
                     to_return[bias_name] = my_state_dict[bias_name]
         return to_return
@@ -72,19 +75,19 @@ def monarch_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.
 
 def get_monarch_parameters(model, bias='none'):
     params = []
-    for name, param in model.named_parameters():
+    for name, param in model.backbone.named_parameters():
         if bias == 'none':
-            if 'more_' in name:
+            if '_blkdiag' in name:
                 params.append(param)
         elif bias == 'all':
-            if 'more_' in name or 'bias' in name:
+            if '_blkdiag' in name or 'bias' in name:
                 params.append(param)
         elif bias == 'monarch_only':
-            if 'more_' in name:
+            if '_blkdiag' in name:
                 params.append(param)
-                bias_name = name.split('more_')[0] + 'bias'
-                if bias_name in model.state_dict():
-                    bias_param = dict(model.named_parameters())[bias_name]
+                bias_name = name.split('_blkdiag')[0] + 'bias'
+                if bias_name in model.backbone.state_dict():
+                    bias_param = dict(model.backbone.named_parameters())[bias_name]
                     params.append(bias_param)
         else:
             raise NotImplementedError
@@ -93,16 +96,16 @@ def get_monarch_parameters(model, bias='none'):
 
 def apply_monarch(args, clip_model):
     list_monarch_layers = []
-    print("entrei na apply_monarch")
+    # print("entrei na apply_monarch")
     if args.encoder == 'text' or args.encoder == 'both':
         indices = INDEX_POSITIONS_TEXT[args.position]
         text_encoder = clip_model.backbone.transformer
         for i, block in enumerate(text_encoder.resblocks):
-            print(f"Residual Attention Block {i}: {block}")
+            # print(f"Residual Attention Block {i}: {block}")
             if i in indices:
                 for name, submodule in block.named_children():
                     if isinstance(submodule, nn.MultiheadAttention):
-                        print(f"Applying MoRE to {name} in text encoder block {i}")
+                        # print(f"Applying MoRE to {name} in text encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
                         setattr(block, name, new_multi_head_monarch)
@@ -112,11 +115,11 @@ def apply_monarch(args, clip_model):
         indices = INDEX_POSITIONS_VISION[args.backbone][args.position]
         vision_encoder = clip_model.backbone.visual.transformer
         for i, block in enumerate(vision_encoder.resblocks):
-            print(f"Residual Attention Block {i}: {block}")
+            # print(f"Residual Attention Block {i}: {block}")
             if i in indices:
                 for name, submodule in block.named_children():
                     if isinstance(submodule, nn.MultiheadAttention):
-                        print(f"Applying MoRE to {name} in vision encoder block {i}")
+                        # print(f"Applying MoRE to {name} in vision encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
                             submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
                         setattr(block, name, new_multi_head_monarch)

@@ -20,10 +20,12 @@ def main():
     parser.add_argument('--encoder', type=str, choices=['text', 'vision', 'both'], default='both')
     parser.add_argument('--params', metavar='N', type=str, nargs='+', default=['q', 'k', 'v'], help='list of attention matrices where putting a LoRA') 
     parser.add_argument('--dropout_rate', default=0.25, type=float, help='dropout rate applied before the LoRA module')
+    parser.add_argument('--lr', default=2e-4, type=float)
+    parser.add_argument('--n_iters', default=500, type=int)
+    parser.add_argument('--eval_only', action='store_true', help='Run evaluation only without training', default=True)
 
-    parser.add_argument("--num_blocks", type=int, default=12, help="Number of blocks in the model")
-    parser.add_argument("--dim_blocks", type=int, default=512, help="Dimension of the blocks in the model")
-    parser.add_argument("--block_rank", type=int, default=8, help="Rank of the blocks in the model")
+    parser.add_argument("--num_blocks", type=int, default=16, help="Number of blocks in the model")
+    parser.add_argument("--block_rank", type=int, default=16, help="Rank of the blocks in the model")
 
     args = parser.parse_args()
 

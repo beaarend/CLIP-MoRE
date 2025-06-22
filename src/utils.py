@@ -6,31 +6,31 @@ import open_clip
 This code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by Max Zanella.
 """
 
-# def get_zero_shot_classifier(classnames, template, model):
-#     """
-#     Get the zero-shot classifier weights for the given class names and template.
+def get_zero_shot_classifier(classnames, template, model):
+    """
+    Get the zero-shot classifier weights for the given class names and template.
     
-#     Args:
-#         classnames (list): List of class names.
-#         template (list): List of templates for text prompts.
-#         model: The model to use for feature extraction.
+    Args:
+        classnames (list): List of class names.
+        template (list): List of templates for text prompts.
+        model: The model to use for feature extraction.
         
-#     Returns:
-#         torch.Tensor: The classifier weights.
-#     """
-#     with torch.no_grad():
-#         weights = []
-#         for classname in classnames:
-#             classname = classname.replace('_', ' ')
-#             texts = [t.format(classname) for t in template]
-#             texts = model.language_preprocess(texts).cuda()
-#             class_embeddings = model.backbone.encode_text(texts)
-#             class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
-#             class_embedding = class_embeddings.mean(dim=0)
-#             class_embedding /= class_embedding.norm()
-#             weights.append(class_embedding)
-#         weights = torch.stack(weights, dim=1).cuda()
-#     return weights
+    Returns:
+        torch.Tensor: The classifier weights.
+    """
+    with torch.no_grad():
+        weights = []
+        for classname in classnames:
+            classname = classname.replace('_', ' ')
+            texts = [t.format(classname) for t in template]
+            texts = model.language_preprocess(texts).cuda()
+            class_embeddings = model.backbone.encode_text(texts)
+            class_embeddings /= class_embeddings.norm(dim=-1, keepdim=True)
+            class_embedding = class_embeddings.mean(dim=0)
+            class_embedding /= class_embedding.norm()
+            weights.append(class_embedding)
+        weights = torch.stack(weights, dim=1).cuda()
+    return weights
 
 # def pre_load_features(model, loader):
 #     """
@@ -54,3 +54,11 @@ This code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by
 #         features, labels = torch.cat(features), torch.cat(labels)
     
 #     return features, labels
+
+def cls_acc(output, target, topk=1):
+    pred = output.topk(topk, 1, True, True)[1].t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+    acc = float(correct[: topk].reshape(-1).float().sum(0, keepdim=True).cpu().numpy())
+    acc = 100 * acc / target.shape[0]
+    
+    return acc
