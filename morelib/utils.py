@@ -22,6 +22,15 @@ INDEX_POSITIONS_TEXT = {
 
 
 INDEX_POSITIONS_VISION = {
+    'ViT-B/16': {
+        'top': [11],
+        'top3': [9, 10, 11],
+        'bottom': [0, 1, 2, 3],
+        'mid': [4, 5, 6, 7],
+        'up': [8, 9, 10, 11],
+        'half-up': [6, 7, 8, 9, 10, 11],
+        'half-bottom': [0, 1, 2, 3, 4, 5],
+        'all': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]},
     'ViT-B/32': {
         'bottom': [0, 1, 2, 3],
         'mid': [4, 5, 6, 7],
@@ -29,11 +38,15 @@ INDEX_POSITIONS_VISION = {
         'half-up': [6, 7, 8, 9, 10, 11],
         'half-bottom': [0, 1, 2, 3, 4, 5],
         'all': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]},
+
+    'ViT-L/14': {
+        'half-up': [12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+        'half-bottom': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+        'all': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]}
 }
 
-
 def mark_only_monarch_as_trainable(model: nn.Module, bias: str = 'none') -> None:
-    for n, p in model.backbone.named_parameters():
+    for n, p in model.named_parameters():
         # print(f"Parameter: {n}")
         if '_blkdiag' not in n:
             p.requires_grad = False
@@ -41,22 +54,21 @@ def mark_only_monarch_as_trainable(model: nn.Module, bias: str = 'none') -> None
     if bias == 'none':
         return
     elif bias == 'all':
-        for n, p in model.backbone.named_parameters():
+        for n, p in model.named_parameters():
             if 'bias' in n:
                 p.requires_grad = True
     elif bias == 'monarch_only':
-        for m in model.backbone.modules():
+        for m in model.modules():
             if isinstance(m, MonarchLayer) and \
                     hasattr(m, 'bias') and \
                     m.bias is not None:
                 m.bias.requires_grad = True
-        # print("Marked only MoRE layers and their biases as trainable.")
     else:
         raise NotImplementedError
 
 
 def monarch_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.Tensor]:
-    my_state_dict = model.backbone.state_dict()
+    my_state_dict = model.state_dict()
     if bias == 'none':
         return {k: my_state_dict[k] for k in my_state_dict if '_blkdiag' in k}
     elif bias == 'all':
@@ -73,10 +85,9 @@ def monarch_state_dict(model: nn.Module, bias: str = 'none') -> Dict[str, torch.
     else:
         raise NotImplementedError
 
-
 def get_monarch_parameters(model, bias='none'):
     params = []
-    for name, param in model.backbone.named_parameters():
+    for name, param in model.named_parameters():
         if bias == 'none':
             if '_blkdiag' in name:
                 params.append(param)
@@ -87,8 +98,8 @@ def get_monarch_parameters(model, bias='none'):
             if '_blkdiag' in name:
                 params.append(param)
                 bias_name = name.split('_blkdiag')[0] + 'bias'
-                if bias_name in model.backbone.state_dict():
-                    bias_param = dict(model.backbone.named_parameters())[bias_name]
+                if bias_name in model.state_dict():
+                    bias_param = dict(model.named_parameters())[bias_name]
                     params.append(bias_param)
         else:
             raise NotImplementedError
@@ -100,7 +111,7 @@ def apply_monarch(args, clip_model):
     # print("entrei na apply_monarch")
     if args.encoder == 'text' or args.encoder == 'both':
         indices = INDEX_POSITIONS_TEXT[args.position]
-        text_encoder = clip_model.backbone.transformer
+        text_encoder = clip_model.transformer
         for i, block in enumerate(text_encoder.resblocks):
             # print(f"Residual Attention Block {i}: {block}")
             if i in indices:
@@ -116,7 +127,7 @@ def apply_monarch(args, clip_model):
 
     if args.encoder == 'vision' or args.encoder == 'both':
         indices = INDEX_POSITIONS_VISION[args.backbone][args.position]
-        vision_encoder = clip_model.backbone.visual.transformer
+        vision_encoder = clip_model.visual.transformer
         for i, block in enumerate(vision_encoder.resblocks):
             # print(f"Residual Attention Block {i}: {block}")
             if i in indices:
@@ -130,3 +141,61 @@ def apply_monarch(args, clip_model):
                         # setattr(submodule, name, new_multi_head_monarch)
                         list_monarch_layers.append(new_multi_head_monarch)
     return list_monarch_layers
+
+def save_monarch(args, list_monarch_wrappers):
+    """
+    Saves the trained Monarch adapter weights and metadata to a file.
+    
+    Args:
+        args: Command-line arguments containing metadata.
+        list_monarch_wrappers: A list of the PlainMultiheadAttentionMoRE modules.
+    """
+    weights = {}
+    
+    for i, mha_wrapper in enumerate(list_monarch_wrappers):
+        layer_weights = {}
+        if isinstance(mha_wrapper.q_proj, MonarchLayer):
+            layer_weights['q_proj'] = {
+                'w_blkdiag1': mha_wrapper.q_proj.w_blkdiag1.data,
+                'w_blkdiag2': mha_wrapper.q_proj.w_blkdiag2.data
+            }
+        if isinstance(mha_wrapper.k_proj, MonarchLayer):
+            layer_weights['k_proj'] = {
+                'w_blkdiag1': mha_wrapper.k_proj.w_blkdiag1.data,
+                'w_blkdiag2': mha_wrapper.k_proj.w_blkdiag2.data
+            }
+        if isinstance(mha_wrapper.v_proj, MonarchLayer):
+            layer_weights['v_proj'] = {
+                'w_blkdiag1': mha_wrapper.v_proj.w_blkdiag1.data,
+                'w_blkdiag2': mha_wrapper.v_proj.w_blkdiag2.data
+            }
+        if isinstance(mha_wrapper.proj, MonarchLayer): # The output projection
+            layer_weights['proj'] = {
+                'w_blkdiag1': mha_wrapper.proj.w_blkdiag1.data,
+                'w_blkdiag2': mha_wrapper.proj.w_blkdiag2.data
+            }
+            
+        weights[f'layer_{i}'] = layer_weights
+        
+    metadata = {
+        'num_blocks': args.num_blocks,
+        'block_rank': args.block_rank,
+        'encoder': args.encoder,
+        'params': args.params,
+        'position': args.position,
+        'dropout_rate': args.dropout_rate
+    }
+
+    save_data = {
+        'weights': weights,
+        'metadata': metadata
+    }
+
+    # This part for creating the directory and saving is great and can be kept
+    backbone = args.backbone.replace('/', '').replace('-', '').lower()
+    save_dir = f'{args.save_path}/{backbone}/{args.dataset}/{args.shots}shots/{args.n_iters}iters'
+    os.makedirs(save_dir, exist_ok=True)
+
+    save_path = f'{save_dir}/{args.filename}.pt'
+    torch.save(save_data, save_path)
+    print(f'Monarch weights saved to {save_path}')
