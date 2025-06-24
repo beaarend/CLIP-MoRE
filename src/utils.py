@@ -2,7 +2,8 @@ from tqdm import tqdm
 import torch
 import open_clip
 import clip
-
+import random
+import numpy as np
 """
 This code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by Max Zanella.
 """
@@ -103,3 +104,44 @@ def debug_similarity(cosine_similarity, target, classnames, epoch_num, batch_idx
     else:
         print("  - Result: INCORRECT")
     print("----------------------------------------------------------\n")
+
+def save_results(args, test_accuracy, last_train_loss):
+    """
+    Saves the key hyperparameters and results of a training run to a text file.
+    Appends to the file if it already exists.
+    """
+    output_file = "testing_hyperparameters.txt"
+    
+    # The list of important arguments you want to save
+    important_args = [
+        "shots", "position", "encoder", "params", "dropout_rate", "lr", 
+        "n_iters", "alpha", "num_blocks", "block_rank"
+    ]
+    
+    # Use 'a' mode to append to the file. It will be created if it doesn't exist.
+    with open(output_file, 'a') as f:
+        f.write("--- New Experiment Run ---\n")
+        
+        # Write the hyperparameters
+        f.write("Hyperparameters:\n")
+        for arg_name in important_args:
+            if hasattr(args, arg_name):
+                value = getattr(args, arg_name)
+                f.write(f"  - {arg_name}: {value}\n")
+        
+        # Write the final results
+        f.write("Results:\n")
+        f.write(f"  - Final Test Accuracy: {test_accuracy:.4f}\n")
+        f.write(f"  - Last Training Loss: {last_train_loss:.4f}\n")
+        
+        f.write("--------------------------\n\n")
+
+    print(f"Results of this run were saved to {output_file}")
+
+def set_random_seed(seed: int):
+    """Sets the random seed for reproducibility."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    print(f"Set random seed to {seed}")

@@ -1,3 +1,4 @@
+from time import sleep
 import torch
 import argparse
 import torchvision.transforms as transforms 
@@ -6,6 +7,7 @@ from datasets import build_dataset
 from datasets.utils import build_data_loader
 from training import run_monarch_training
 import clip
+from src.utils import set_random_seed
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -16,22 +18,32 @@ def main():
     parser.add_argument("--backbone", type=str, default="ViT-B/16", help="Backbone model to use")
     parser.add_argument("--dataset", type=str, default="oxford_flowers", help="Dataset to use")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for data loader")
-    parser.add_argument("--shots", type=int, default=1, help="Number of shots for few-shot learning")
-    parser.add_argument('--position', type=str, default='all', choices=['bottom', 'mid', 'up', 'half-up', 'half-bottom', 'all', 'top3'], help='where to put the LoRA modules')
+    parser.add_argument("--shots", type=int, help="Number of shots for few-shot learning")
+    parser.add_argument('--position', type=str, default='top1', choices=['bottom', 'mid', 'up', 'half-up', 'half-bottom', 'all', 'top3', 'top1'], help='where to put the LoRA modules')
     parser.add_argument('--encoder', type=str, choices=['text', 'vision', 'both'], default='both')
-    parser.add_argument('--params', metavar='N', type=str, nargs='+', default=['q', 'k', 'v'], help='list of attention matrices where putting a LoRA') 
-    parser.add_argument('--dropout_rate', default=0.25, type=float, help='dropout rate applied before the LoRA module')
-    parser.add_argument('--lr', default=1e-6, type=float)
-    parser.add_argument('--n_iters', default=20, type=int)
+    parser.add_argument('--params', metavar='N', type=str, nargs='+', help='list of attention matrices where putting a monarch') 
+    parser.add_argument('--dropout_rate', default=0.25, type=float, help='dropout rate applied before the monarch module')
+    parser.add_argument('--lr',  type=float)
+    parser.add_argument('--n_iters', default=100, type=int)
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only without training', default=False)
     parser.add_argument('--save_path', type=str, default='results/', help='Path to save the trained model')
-    parser.add_argument('--filename', default='lora_weights', help='file name to save the lora weights (.pt extension will be added)')
+    parser.add_argument('--filename', default='lora_weights', help='file name to save the monarch weights (.pt extension will be added)')
+    parser.add_argument('--alpha', type=float, help='scaling')
+    parser.add_argument('--seed', type=int, default=42, help='random seed for reproducibility')
 
-    parser.add_argument("--num_blocks", type=int, default=8, help="Number of blocks in the model")
-    parser.add_argument("--block_rank", type=int, default=4, help="Rank of the blocks in the model")
+    parser.add_argument("--num_blocks", type=int, help="Number of blocks in the model")
+    parser.add_argument("--block_rank", type=int, help="Rank of the blocks in the model")
 
     args = parser.parse_args()
+    # set_random_seed(args.seed)
+
+    # # print all the arguments
+    print("Arguments:")
+    for arg, value in vars(args).items():
+        print(f"  {arg}: {value}")
     
+    sleep(1)
+
     # model = OpenCLIP(device)
     # model.load_model()
     # logit_scale = 50

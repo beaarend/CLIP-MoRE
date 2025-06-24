@@ -1,12 +1,13 @@
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
+from transformers import get_cosine_schedule_with_warmup
 from morelib.utils import apply_monarch, mark_only_monarch_as_trainable, get_monarch_parameters, save_monarch
-from src.utils import cls_acc, get_zero_shot_classifier, debug_similarity
+from src.utils import cls_acc, get_zero_shot_classifier, debug_similarity, save_results
 import clip
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-VALIDATION = True
+VALIDATION = False
 
 # def evaluate_monarch(model, loader, text_features, device):
 #     model.eval()
@@ -75,10 +76,17 @@ def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_lo
         print(f"Validation accuracy: {acc:.4f}")
         return
 
-    mark_only_monarch_as_trainable(model, "all")
+    mark_only_monarch_as_trainable(model, "monarch_only")
     total_iters = args.n_iters * args.shots
+    warmup_iters = int(total_iters * 0.1)  
+
     optimizer = torch.optim.AdamW(get_monarch_parameters(model), weight_decay=1e-2, betas=(0.9, 0.999), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, total_iters, eta_min=1e-6)
+    # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, total_iters, eta_min=1e-6)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=warmup_iters, 
+        num_training_steps=total_iters
+    )
     print("Optimizer and scheduler initialized.")
 
     scaler = torch.cuda.amp.GradScaler()
@@ -119,6 +127,8 @@ def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_lo
             tot_samples += target.shape[0]
             optimizer.zero_grad()
             scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(get_monarch_parameters(model, bias="monarch_only"), 1.0)
             # debug_similarity(cosine_similarity, target, dataset.classnames, i, epoch_num)
             # if count_iters < 10:
             #     print("\n--- Checking Gradients ---")
@@ -152,6 +162,7 @@ def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_lo
     
     acc_test = evaluate_monarch(model, test_loader, dataset)
     print("**** Final test accuracy: {:.2f}. ****\n".format(acc_test))
+    save_results(args, acc_test, loss_epoch)
     
     if args.save_path != None:
         save_monarch(args, list_monarch_layers)

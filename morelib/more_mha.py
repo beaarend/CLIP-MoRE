@@ -15,6 +15,7 @@ class PlainMultiheadAttentionMoRE(nn.Module):
             block_rank: int,
             enable_monarch: list = ['q', 'k', 'v', 'o'], 
             dropout_rate: float = 0.0,
+            scaling: float = 1.0,
             **kwargs
         ):
         super().__init__()
@@ -68,22 +69,26 @@ class PlainMultiheadAttentionMoRE(nn.Module):
                 self.q_proj = MonarchLayer(self.q_proj,
                                          num_blocks=num_blocks,
                                          block_rank=block_rank,
-                                         dropout_rate = dropout_rate)
+                                         dropout_rate = dropout_rate,
+                                         scaling = scaling)
             elif item == 'k':
                 self.k_proj = MonarchLayer(self.k_proj,
                                          num_blocks=num_blocks,
                                          block_rank=block_rank,
-                                         dropout_rate = dropout_rate)
+                                         dropout_rate = dropout_rate,
+                                         scaling = scaling)
             elif item == 'v':
                 self.v_proj = MonarchLayer(self.v_proj,
                                          num_blocks=num_blocks,
                                          block_rank=block_rank,
-                                         dropout_rate = dropout_rate)
+                                         dropout_rate = dropout_rate,
+                                         scaling = scaling)
             elif item == 'o':
                 self.proj = MonarchLayer(self.proj,
                                          num_blocks=num_blocks,
                                          block_rank=block_rank,
-                                         dropout_rate = dropout_rate)
+                                         dropout_rate = dropout_rate,
+                                         scaling = scaling)
         
     def forward_module(
             self,

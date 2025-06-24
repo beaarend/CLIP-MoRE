@@ -23,7 +23,7 @@ INDEX_POSITIONS_TEXT = {
 
 INDEX_POSITIONS_VISION = {
     'ViT-B/16': {
-        'top': [11],
+        'top1': [11],
         'top3': [9, 10, 11],
         'bottom': [0, 1, 2, 3],
         'mid': [4, 5, 6, 7],
@@ -119,7 +119,7 @@ def apply_monarch(args, clip_model):
                     if isinstance(submodule, nn.MultiheadAttention):
                         # print(f"Applying MoRE to {name} in text encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
-                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate, scaling = args.alpha)
                         new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
                         # setattr(submodule, name, new_multi_head_monarch)
@@ -135,7 +135,7 @@ def apply_monarch(args, clip_model):
                     if isinstance(submodule, nn.MultiheadAttention):
                         # print(f"Applying MoRE to {name} in vision encoder block {i}")
                         new_multi_head_monarch = PlainMultiheadAttentionMoRE(
-                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate)
+                            submodule, enable_monarch=args.params, num_blocks=args.num_blocks, block_rank=args.block_rank, dropout_rate=args.dropout_rate, scaling = args.alpha)
                         new_multi_head_monarch.to(device)
                         setattr(block, name, new_multi_head_monarch)
                         # setattr(submodule, name, new_multi_head_monarch)

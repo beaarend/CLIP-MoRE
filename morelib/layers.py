@@ -86,7 +86,7 @@ class BaseLayer():
                 raise ValueError(f"Unsupported initialization type: {init_type}")
 
 class MonarchLayer(nn.Linear, BaseLayer):
-    def __init__(self, existing_linear, num_blocks: int, block_rank: int, dropout_rate: float = 0.0):
+    def __init__(self, existing_linear, num_blocks: int, block_rank: int, dropout_rate: float = 0.0, scaling: float = 1.0):
         self.in_features = existing_linear.in_features
         self.out_features = existing_linear.out_features
         self.num_blocks = num_blocks
@@ -97,6 +97,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
         self.merged = False
         self.device = device
         self.dtype = existing_linear.weight.dtype
+        self.scaling = scaling
 
         super().__init__(
             in_features=existing_linear.in_features, 
@@ -115,7 +116,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
 
         self.params_with_monarch = {'weight': 'w'}
         self.register_monarch_param(self.dtype)
-        self.init_monarch_param('zero')
+        self.init_monarch_param('kaiming')
 
         if dropout_rate > 0:
             self.dropout = nn.Dropout(dropout_rate)
@@ -162,9 +163,11 @@ class MonarchLayer(nn.Linear, BaseLayer):
             # Calculate the adjustment M*x
             adjustment = self.monarch_forward(x, blkdiag1, blkdiag2)
             
-            return original_output + adjustment
+            # print(f"Applying Monarch adjustment with scaling {self.scaling} to the output.")
+            return original_output + (self.scaling * adjustment) 
         else:
             # If in eval mode, we return the original output
+            # print("Warning: Monarch layer is in evaluation mode. No Monarch adjustment applied.")
             return original_output
 
     def preprocess(self, x):
