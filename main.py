@@ -5,7 +5,7 @@ import torchvision.transforms as transforms
 from src.clip_architectures import OpenCLIP
 from datasets import build_dataset
 from datasets.utils import build_data_loader
-from training import run_monarch_training
+from training import run_monarch_training, evaluate_classifier
 import clip
 from src.utils import set_random_seed
 
@@ -38,11 +38,11 @@ def main():
     # set_random_seed(args.seed)
 
     # # print all the arguments
-    print("Arguments:")
-    for arg, value in vars(args).items():
-        print(f"  {arg}: {value}")
+    # print("Arguments:")
+    # for arg, value in vars(args).items():
+    #     print(f"  {arg}: {value}")
     
-    sleep(1)
+    # sleep(1)
 
     # model = OpenCLIP(device)
     # model.load_model()
@@ -58,6 +58,11 @@ def main():
     val_loader = build_data_loader(dataset.val, batch_size=args.batch_size, tfm=preprocess, is_train=False, shuffle=False, num_workers=8)
     test_loader = build_data_loader(dataset.test, batch_size=args.batch_size, tfm=preprocess, is_train=False, shuffle=False, num_workers=8)
 
+    # print all classnames from dataset
+    # print("Classnames in the dataset:")
+    # for i, classname in enumerate(dataset.classnames):
+    #     print(f"  {i}: {classname}")
+
     train_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.RandomHorizontalFlip(p=0.5),
@@ -66,7 +71,14 @@ def main():
     ])
     train_loader = build_data_loader(data_source=dataset.train_x, batch_size=args.batch_size, tfm=train_transform, is_train=True, shuffle=True, num_workers=4)
 
+    if(args.eval_only):
+        print("Evaluation mode only. Skipping training.")
+        evaluate_classifier(args, model, test_loader, dataset, preprocess)
+        return
+
     run_monarch_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader)
+
+
 
 if __name__ == "__main__":
     main()

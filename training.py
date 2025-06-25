@@ -2,34 +2,178 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 from transformers import get_cosine_schedule_with_warmup
-from morelib.utils import apply_monarch, mark_only_monarch_as_trainable, get_monarch_parameters, save_monarch
+from morelib.utils import apply_monarch, mark_only_monarch_as_trainable, get_monarch_parameters, save_monarch, load_monarch
 from src.utils import cls_acc, get_zero_shot_classifier, debug_similarity, save_results
 import clip
+import random
+from PIL import Image, ImageDraw, ImageFont
+import os
+import torchvision.transforms.functional as TF
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 VALIDATION = False
 
-# def evaluate_monarch(model, loader, text_features, device):
-#     model.eval()
-#     acc = 0.
-#     tot_samples = 0
-#     with torch.no_grad():
-#         for i, (images, target) in enumerate(tqdm(loader, desc="Evaluating MoRE model")):
-#             target = target - 1
-#             images, target = images.to(device), target.to(device)
-            
-#             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-#                 image_features = model.encode_image(images)
-#                 image_features /= image_features.norm(dim=-1, keepdim=True)
 
-#                 # Calculate logits by multiplying with the pre-computed text features
-#                 cosine_similarity = image_features @ text_features
+def denormalize_tensor_to_pil(tensor):
+    """
+    Converts a normalized PyTorch tensor back to a PIL Image.
+    The tensor is expected to be of shape (C, H, W).
+    """
+    # CLIP's normalization constants
+    mean = [0.48145466, 0.4578275, 0.40821073]
+    std = [0.26862954, 0.26130258, 0.27577711]
+    
+    # Clone the tensor to avoid modifying the original
+    denorm_tensor = tensor.clone()
+    
+    # Reverse the normalization
+    for t, m, s in zip(denorm_tensor, mean, std):
+        t.mul_(s).add_(m)
+        
+    # Clamp values to [0, 1] to handle potential floating point inaccuracies
+    denorm_tensor = torch.clamp(denorm_tensor, 0, 1)
+    
+    # Convert tensor to PIL Image
+    pil_image = TF.to_pil_image(denorm_tensor)
+    return pil_image
 
-#             acc += cls_acc(cosine_similarity, target) * len(cosine_similarity)
-#             tot_samples += len(cosine_similarity)
+
+def evaluate_classifier(args, model, test_loader, dataset, preprocess):
+    list_monarch_layers = apply_monarch(args, model)
+    load_monarch(args, list_monarch_layers)
+    
+    save_dir = "image_results/"
+    os.makedirs(save_dir, exist_ok=True)
+
+    model.eval()
+
+    with torch.no_grad():
+        template = dataset.template[0]
+        texts = [template.format(classname.replace('_', ' ')) for classname in dataset.classnames]
+        with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+            tokenized_texts = clip.tokenize(texts).to(device)
+            class_embeddings = model.encode_text(tokenized_texts)
+        text_features = class_embeddings / class_embeddings.norm(dim=-1, keepdim=True)
+
+    all_test_items = []
+    with torch.no_grad():
+        for images, targets in tqdm(test_loader, desc="Collecting"):
+            # We store items on the CPU to conserve GPU memory
+            for i in range(images.size(0)):
+                all_test_items.append((images[i].cpu(), targets[i].cpu()))
+    
+    num_to_sample = 15
+    if len(all_test_items) < num_to_sample:
+        print(f"Warning: Only {len(all_test_items)} images available. Using all of them.")
+        num_to_sample = len(all_test_items)
+    
+    sampled_items = random.sample(all_test_items, num_to_sample)
+
+    images_saved_count = 0
+    for i, (image_tensor, target) in enumerate(tqdm(sampled_items, desc="Processing Random Images")):
+
+            target = target - 1 
+            image_gpu_tensor = image_tensor.to(device).unsqueeze(0)
+
+            # Get model prediction for the single image
+            with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+                image_features = model.encode_image(image_gpu_tensor)
+            image_features /= image_features.norm(dim=-1, keepdim=True)
+            cosine_similarity = image_features @ text_features.t()
+            _, pred_index_tensor = cosine_similarity.topk(1, dim=1)
             
-#     acc /= tot_samples
-#     return acc
+            # Retrieve labels. NOTE: Your dataset already provides 0-based labels,
+            # so `targets = targets - 1` is not needed here.
+            gt_index = target.item()
+            pred_index = pred_index_tensor[0].item()
+
+            ground_truth_name = dataset.classnames[gt_index]
+            predicted_name = dataset.classnames[pred_index]
+
+            # Convert the CPU tensor back to a PIL image for annotation
+            annotated_image = denormalize_tensor_to_pil(image_tensor)
+
+            # Annotate and save the image
+            draw = ImageDraw.Draw(annotated_image)
+            try:
+                font = ImageFont.truetype("arial.ttf", size=20)
+            except IOError:
+                font = ImageFont.load_default()
+
+            gt_text = f"Ground Truth: {ground_truth_name.replace('_', ' ')}"
+            pred_text = f"Prediction: {predicted_name.replace('_', ' ')}"
+            is_correct = (ground_truth_name == predicted_name)
+            text_color = "green" if is_correct else "red"
+
+            draw.rectangle((2, 2, 300, 50), fill=(0, 0, 0, 128))
+            draw.text((5, 5), gt_text, font=font, fill="white")
+            draw.text((5, 27), pred_text, font=font, fill=text_color)
+
+            safe_gt = ground_truth_name.replace('_', '-').replace(' ', '')
+            safe_pred = predicted_name.replace('_', '-').replace(' ', '')
+            filename = f"{i + 1:02d}_GT_{safe_gt}_PRED_{safe_pred}.png"
+            annotated_image.save(os.path.join(save_dir, filename))
+
+    print(f"\nFinished! Saved {len(sampled_items)} random annotated images to the '{save_dir}' directory.")
+    # with torch.no_grad():
+    #     for images, targets in tqdm(test_loader, desc="Processing Batches"):
+    #         targets = targets - 1  # Adjust target indices to be 0-based
+    #         images, targets = images.to(device), targets.to(device)
+
+    #         # Get model predictions for the entire batch (efficient)
+    #         with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
+    #             image_features = model.encode_image(images)
+    #         image_features /= image_features.norm(dim=-1, keepdim=True)
+    #         cosine_similarity = image_features @ text_features.t()
+    #         _, pred_indices = cosine_similarity.topk(1, dim=1)
+            
+    #         # --- 3. Process each image in the batch ---
+    #         for i in range(images.size(0)):
+    #             if images_saved_count >= 15:
+    #                 break # Stop after saving 15 images
+
+    #             # Get the tensor for the single image
+    #             image_tensor = images[i].cpu()
+                
+    #             # The label from your loader is already 0-based because of the
+    #             # "label=y-1" logic in your OxfordFlowers class.
+    #             gt_index = targets[i].item()
+    #             pred_index = pred_indices[i].item()
+
+    #             ground_truth_name = dataset.classnames[gt_index]
+    #             predicted_name = dataset.classnames[pred_index]
+
+    #             # Convert the processed tensor back to a PIL image for annotation
+    #             annotated_image = denormalize_tensor_to_pil(image_tensor)
+
+    #             # --- 4. Annotate and save the image ---
+    #             draw = ImageDraw.Draw(annotated_image)
+    #             try:
+    #                 font = ImageFont.truetype("arial.ttf", size=20)
+    #             except IOError:
+    #                 font = ImageFont.load_default()
+
+    #             gt_text = f"Ground Truth: {ground_truth_name.replace('_', ' ')}"
+    #             pred_text = f"Prediction: {predicted_name.replace('_', ' ')}"
+    #             is_correct = (ground_truth_name == predicted_name)
+    #             text_color = "green" if is_correct else "red"
+
+    #             draw.rectangle((2, 2, 300, 50), fill=(0, 0, 0, 128))
+    #             draw.text((5, 5), gt_text, font=font, fill="white")
+    #             draw.text((5, 27), pred_text, font=font, fill=text_color)
+
+    #             safe_gt = ground_truth_name.replace('_', '-').replace(' ', '')
+    #             safe_pred = predicted_name.replace('_', '-').replace(' ', '')
+    #             filename = f"{images_saved_count + 1:02d}_GT_{safe_gt}_PRED_{safe_pred}.png"
+    #             annotated_image.save(os.path.join(save_dir, filename))
+                
+    #             images_saved_count += 1
+
+    #         if images_saved_count >= 15:
+    #             break # Exit the main loop as well
+
+    # print(f"\nFinished! Saved {images_saved_count} annotated images to the '{save_dir}' directory.")
+
 
 def evaluate_monarch(clip_model, loader, dataset):
     clip_model.eval()

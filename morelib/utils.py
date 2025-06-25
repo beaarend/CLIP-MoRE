@@ -199,3 +199,57 @@ def save_monarch(args, list_monarch_wrappers):
     save_path = f'{save_dir}/{args.filename}.pt'
     torch.save(save_data, save_path)
     print(f'Monarch weights saved to {save_path}')
+
+def load_monarch(args, list_monarch_layers):
+    # to manage names like ViT-B/16
+    backbone = args.backbone.replace('/', '').replace('-', '').lower()
+    load_path = f'{args.save_path}/{backbone}/{args.dataset}/{args.shots}shots/{args.n_iters}iters/{args.filename}.pt'
+
+    if not os.path.exists(load_path):
+        raise FileNotFoundError(f'File {load_path} does not exist.')
+
+    loaded_data = torch.load(load_path)
+
+    metadata = loaded_data['metadata']
+    if metadata['num_blocks'] != args.num_blocks:
+        raise ValueError(
+            f"num_blocks mismatch: expected {args.num_blocks}, found {metadata['num_blocks']}")
+    if metadata['block_rank'] != args.block_rank:
+        raise ValueError(
+            f"block_rank mismatch: expected {args.block_rank}, found {metadata['block_rank']}")
+    if metadata['encoder'] != args.encoder:
+        raise ValueError(
+            f"Encoder mismatch: expected {args.encoder}, found {metadata['encoder']}")
+    if metadata['params'] != args.params:
+        raise ValueError(
+            f"Params mismatch: expected {args.params}, found {metadata['params']}")
+    if metadata['position'] != args.position:
+        raise ValueError(
+            f"Position mismatch: expected {args.position}, found {metadata['position']}")
+    if metadata['dropout_rate'] != args.dropout_rate:
+        raise ValueError(
+            f"Position mismatch: expected {args.dropout_rate}, found {metadata['dropout_rate']}")
+
+    weights = loaded_data['weights']
+    for i, layer in enumerate(list_monarch_layers):
+        layer_weights = weights[f'layer_{i}']
+        if 'q' in args.params and 'q_proj' in layer_weights:
+            layer.q_proj.w_blkdiag1.data.copy_(
+                layer_weights['q_proj']['w_blkdiag1'])
+            layer.q_proj.w_blkdiag2.data.copy_(
+                layer_weights['q_proj']['w_blkdiag2'])
+        if 'k' in args.params and 'k_proj' in layer_weights:
+            layer.k_proj.w_blkdiag1.data.copy_(
+                layer_weights['k_proj']['w_blkdiag1'])
+            layer.k_proj.w_blkdiag2.data.copy_(
+                layer_weights['k_proj']['w_blkdiag2'])
+        if 'v' in args.params and 'v_proj' in layer_weights:
+            layer.v_proj.w_blkdiag1.data.copy_(
+                layer_weights['v_proj']['w_blkdiag1'])
+            layer.v_proj.w_blkdiag2.data.copy_(
+                layer_weights['v_proj']['w_blkdiag2'])
+        if 'o' in args.params and 'proj' in layer_weights:
+            layer.proj.w_blkdiag1.data.copy_(layer_weights['proj']['w_blkdiag1'])
+            layer.proj.w_blkdiag2.data.copy_(layer_weights['proj']['w_blkdiag2'])
+
+    print(f'MoRE weights loaded from {load_path}')
