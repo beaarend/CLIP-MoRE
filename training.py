@@ -57,6 +57,22 @@ def evaluate_monarch(clip_model, loader, dataset):
 
     return acc
 
+def check_parameters(model, flag):
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+
+    if trainable_params == 0:
+        print(f"Warning: No trainable parameters found in the model after {flag} MoRE application.")
+    if total_params == 0:
+        print(f"Warning: No parameters found in the model after {flag} MoRE application.")
+
+    print(f"--- {flag} Parameter Count ---")
+    print(f"--- Parameter Count ---")
+    print(f"Trainable params: {trainable_params:,}")
+    print(f"Total params:     {total_params:,}")
+    print(f"Percentage:       {100 * trainable_params / total_params:.4f}%")
+    print(f"-----------------------")
+
 def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader):
     """
     Run the training loop for the model with MoRE layers.
@@ -66,6 +82,8 @@ def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_lo
     # Get the text features for the zero-shot classifier
     textual_features = get_zero_shot_classifier(dataset.classnames, dataset.template, model)
 
+    check_parameters(model, "Before MoRE")
+
     # Apply Monarch layers to the model
     list_monarch_layers = apply_monarch(args, model)
     model.cuda()
@@ -74,9 +92,14 @@ def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_lo
         print("Evaluation mode only. Skipping training.")
         acc = evaluate_monarch(model, test_loader, dataset)
         print(f"Validation accuracy: {acc:.4f}")
-        return
+        # return
 
     mark_only_monarch_as_trainable(model, "monarch_only")
+
+    check_parameters(model, "After MoRE")
+
+    exit()
+
     total_iters = args.n_iters * args.shots
     warmup_iters = int(total_iters * 0.1)  
 

@@ -25,7 +25,7 @@ def main():
     parser.add_argument('--dropout_rate', default=0.25, type=float, help='dropout rate applied before the monarch module')
     parser.add_argument('--lr',  type=float)
     parser.add_argument('--n_iters', default=500, type=int)
-    parser.add_argument('--eval_only', action='store_true', help='Run evaluation only without training', default=False)
+    parser.add_argument('--eval_only', action='store_true', help='Run evaluation only without training', default=True)
     parser.add_argument('--save_path', type=str, default='results/', help='Path to save the trained model')
     parser.add_argument('--filename', default='lora_weights', help='file name to save the monarch weights (.pt extension will be added)')
     parser.add_argument('--alpha', type=float, help='scaling')
