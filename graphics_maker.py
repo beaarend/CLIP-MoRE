@@ -181,25 +181,31 @@ def plot_model_comparison_bar(
     methods_data: Dict[str, List[Union[int, float]]],
     datasets: List[str],
     output_dir: str = 'graphics',
-    filename: str = 'nlp_comparison.png'
+    filename: str = 'nlp_sota_comparison.png'
 ) -> None:
     """
-    Creates, displays, and saves an interactive bar chart comparing model performance.
+    Creates, displays, and saves an interactive chart comparing model performance
+    against a top/SOTA score.
 
     Args:
-        methods_data: A dictionary where keys are model names and values are lists of scores.
+        methods_data: A dictionary where keys are model names (e.g., 'LoRA', 'MoRE', 'TOP')
+                      and values are lists of scores.
         datasets: A list of strings representing the dataset names (x-axis categories).
         output_dir: The directory to save the plot in.
-        filename: The name of the output HTML file.
+        filename: The name of the output PNG file.
     """
-    print("Generating NLP performance comparison bar chart...")
+    print("Generating NLP performance comparison chart...")
 
     fig = go.Figure()
 
-    # Define a color palette
-    colors = {'LoRA': '#1f77b4', 'MoRE': '#ff7f0e'}
+    # --- Define a color palette for all methods ---
+    colors = {'LoRA': '#1f77b4', 'MoRE': '#ff7f0e', 'TOP': '#2ca02c'} # Blue, Orange, Green
 
-    # --- Add traces for each method ---
+    # --- Separate TOP scores to plot them as markers ---
+    # This makes the 'TOP' score a benchmark, not just another bar
+    top_scores = methods_data.pop('TOP', None)
+
+    # --- Add traces for each bar-based method (LoRA, MoRE) ---
     for method_name, scores in methods_data.items():
         fig.add_trace(go.Bar(
             x=datasets,
@@ -214,42 +220,61 @@ def plot_model_comparison_bar(
                           'Accuracy: %{y:.1f}%<extra></extra>'
         ))
 
+    # --- Add the TOP scores as overlayed markers ---
+    if top_scores:
+        fig.add_trace(go.Scatter(
+            x=datasets,
+            y=top_scores,
+            name='SOTA / Top Accuracy',
+            mode='markers',
+            marker=dict(
+                color=colors.get('TOP'),
+                symbol='line-ew-open', # Horizontal line marker
+                size=18,
+                line=dict(width=3)
+            ),
+            hovertemplate='<b>SOTA / Top Accuracy</b><br>' +
+                          'Dataset: %{x}<br>' +
+                          'Accuracy: %{y:.1f}%<extra></extra>'
+        ))
+
     # --- Customize the Plot Appearance ---
     fig.update_layout(
         title=dict(
-            text='<b>MoRE vs. LoRA: Commonsense Reasoning Performance</b>',
+            text='<b>MoRE vs LoRA vs. SOTA</b>',
             font=dict(size=20),
             x=0.5,
             pad=dict(b=20)
         ),
         xaxis=dict(
-            title='Dataset',
+            title='<b>Dataset</b>',
             tickangle=-45
         ),
         yaxis=dict(
-            title='Top-1 Accuracy (%)',
+            title='<b>Top-1 Accuracy (%)</b>',
             gridcolor='rgba(0,0,0,0.1)'
         ),
         legend=dict(
-            title='<b>Model</b>',
-            yanchor="top",
-            y=0.98,
-            xanchor="left",
-            x=0.01
+        title='<b>Method</b>',
+        yanchor="top",
+        y=0.99,
+        xanchor="left", # Anchor to the left of the legend box
+        x=1.02        # Position it just to the right of the plot area
         ),
         barmode='group', # Group bars for each dataset side-by-side
-        font=dict(family="Arial, sans-serif", size=12),
+        font=dict(family="Arial, sans-serif", size=12, color="black"),
+        plot_bgcolor='white',
         margin=dict(l=80, r=40, t=80, b=100) # Adjust bottom margin for angled labels
     )
-    
+
     # --- Save the Plot ---
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
     output_path = os.path.join(output_dir, filename)
-    fig.write_image(output_path)
+    # Increase scale for higher resolution image
+    fig.write_image(output_path, scale=2)
     print(f"Plot successfully saved to: {output_path}")
     fig.show()
-
 
 def main():
     """
@@ -263,11 +288,6 @@ def main():
         'CLIP-Adapter': [71.3, 73.1, 92.9],
         'CLIP-LoRA': [83.2, 93.7, 98.0],
         'CLIP-MoRE': [79.2, 93.5, 96.0]
-    }
-
-    nlp_methods_data = {
-        'LoRA': [82.0, 91.5, 95.0],
-        'MoRE': [80.0, 92.0, 96.0]
     }
 
     shots = [1, 4, 16]
@@ -286,7 +306,8 @@ def main():
     # to match the 8 datasets.
     nlp_methods_data = {
         'LoRA': [68.9, 80.7, 77.4, 78.1, 78.8, 77.8, 61.3, 74.8],
-        'MoRE': [67.0, 86.4, 88.4, 97.3, 95.1, 88.5, 76.6, 79.9]
+        'MoRE': [67.0, 86.4, 88.4, 97.3, 95.1, 88.5, 76.6, 79.9],
+        'TOP':  [72.5, 86.3, 88.4, 97.3, 95.1, 88.5, 76.6, 84.2]
     }
 
     # Call the plotting function with the corrected data
