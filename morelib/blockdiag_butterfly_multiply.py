@@ -7,6 +7,8 @@ from torch.nn import functional as F
 
 device_type = "cuda" if torch.cuda.is_available() else "cpu"
 
+"""https://github.com/SprocketLab/sparse_matrix_fine_tuning/blob/main/src/ops/blockdiag_butterfly_multiply.py"""
+
 class BlockdiagMultiply(torch.autograd.Function):
     """This is a faster implementation, with careful memory copies for the fastest
     bmm performance.

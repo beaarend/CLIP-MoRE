@@ -3,6 +3,7 @@ import torch
 import triton
 import triton.language as tl
 
+"""Refer to https://github.com/SprocketLab/sparse_matrix_fine_tuning/blob/main/src/ops/triton.py"""
 
 def config_gen():
     configs = []

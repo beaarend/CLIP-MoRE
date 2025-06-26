@@ -37,16 +37,6 @@ def main():
     args = parser.parse_args()
     # set_random_seed(args.seed)
 
-    # # print all the arguments
-    # print("Arguments:")
-    # for arg, value in vars(args).items():
-    #     print(f"  {arg}: {value}")
-    
-    # sleep(1)
-
-    # model = OpenCLIP(device)
-    # model.load_model()
-    # logit_scale = 50
     model, preprocess = clip.load(args.backbone)
     model.eval()
     logit_scale = model.logit_scale.exp().detach()
@@ -57,11 +47,6 @@ def main():
     dataset = build_dataset(args.dataset, root_path="", shots=args.shots)
     val_loader = build_data_loader(dataset.val, batch_size=args.batch_size, tfm=preprocess, is_train=False, shuffle=False, num_workers=8)
     test_loader = build_data_loader(dataset.test, batch_size=args.batch_size, tfm=preprocess, is_train=False, shuffle=False, num_workers=8)
-
-    # print all classnames from dataset
-    # print("Classnames in the dataset:")
-    # for i, classname in enumerate(dataset.classnames):
-    #     print(f"  {i}: {classname}")
 
     train_transform = transforms.Compose([
             transforms.RandomResizedCrop(size=224, scale=(0.08, 1), interpolation=transforms.InterpolationMode.BICUBIC),
@@ -77,8 +62,6 @@ def main():
         return
 
     run_monarch_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader)
-
-
 
 if __name__ == "__main__":
     main()

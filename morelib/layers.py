@@ -9,6 +9,10 @@ from morelib.triton import monarch_kernel
 from morelib.blockdiag_butterfly_multiply import blockdiag_butterfly_multiply, single_monarch_mult
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+"""
+This code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by Max Zanella and 
+from MoRE-Framework (https://github.com/SprocketLab/sparse_matrix_fine_tuning) by SprocketLab.
+"""
 
 def set_param(curr_mod, name, param=None, mode='update'):
     r"""Refer to https://github.com/Baijiong-Lin/MOML/blob/main/MTL/utils.py"""
@@ -37,12 +41,10 @@ class BaseLayer():
 
     def register_monarch_param(self, dtype: torch.dtype):
         """Register MoRe block-diagonal matrices for each adapted weight."""
-        # print("Registering Monarch parameters for block-diagonal matrices.")
 
         for param_name, monarch_name in self.params_with_monarch.items():
             base_param = getattr(self, param_name)
             
-            # Register blkdiag1 (R) and blkdiag2 (L)
             self.register_parameter(
                 f'{monarch_name}_blkdiag1',
                 nn.Parameter(torch.empty(
@@ -58,12 +60,11 @@ class BaseLayer():
                 ))
             )
             
-            # Freeze the original weight
+            # freezes original weight
             base_param.requires_grad = False
 
     def init_monarch_param(self, init_type):
         """Initialize the MoRe block-diagonal matrices."""
-        # print(f"Initializing Monarch parameters with {init_type} method.")
 
         for param_name, monarch_name in self.params_with_monarch.items():
             blkdiag1 = getattr(self, f'{monarch_name}_blkdiag1')
@@ -72,7 +73,6 @@ class BaseLayer():
             if init_type == 'kaiming':
                 for factor_name in [f'{monarch_name}_blkdiag1', f'{monarch_name}_blkdiag2']:
                     blkdiag = getattr(self, factor_name)
-                    # Kaiming uniform initialization logic from MonarchLinear
                     fan_in = blkdiag.shape[-1]
                     gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
                     std = gain / math.sqrt(fan_in)
@@ -103,12 +103,11 @@ class MonarchLayer(nn.Linear, BaseLayer):
             in_features=existing_linear.in_features, 
             out_features=existing_linear.out_features
         )
+
         # Throw away blocks that are fully padded
         if ((self.num_blocks * self.block_size) > self.in_features):
-            # print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are larger than in_features {self.in_features}. Adjusting num_blocks.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
         elif ((self.num_blocks * self.block_size) < self.in_features):
-            # print(f"Warning: {self.num_blocks} blocks with size {self.block_size} are smaller than in_features {self.in_features}. Adjusting block_size.")
             self.num_blocks = (self.in_features + self.block_size - 1) // self.block_size
 
         self.load_state_dict(existing_linear.state_dict())
@@ -125,7 +124,7 @@ class MonarchLayer(nn.Linear, BaseLayer):
 
     def monarch_forward(self, x: torch.Tensor, blkdiag1: torch.Tensor, blkdiag2: torch.Tensor, use_triton: bool = False) -> torch.Tensor:
         """
-        Forward pass using two monarch factors. Now accepts the factors as arguments.
+        Forward pass using two monarch factors.
         """
         monarch_impl = monarch_kernel
         output = self.monarch_impl(self.preprocess(x), blkdiag1, blkdiag2)
@@ -137,12 +136,12 @@ class MonarchLayer(nn.Linear, BaseLayer):
         """
         super().train(mode)
         if mode:
-            # In training mode, if weights are merged, un-merge them
+            # in training mode unmerge the weights if merged
             if self.merged:
                 self.sub_monarch_data()
                 self.merged = False
         else:
-            # In evaluation mode, if weights are not merged, merge them
+            # in eval if not merged then merge the weights
             if not self.merged:
                 self.add_monarch_data()
                 self.merged = True    

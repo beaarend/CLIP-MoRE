@@ -13,27 +13,22 @@ import torchvision.transforms.functional as TF
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 VALIDATION = False
 
+"""
+Part of this code is adapted from CLIP-LoRA (https://github.com/MaxZanella/CLIP-LoRA) by Max Zanella.
+"""
 
 def denormalize_tensor_to_pil(tensor):
     """
     Converts a normalized PyTorch tensor back to a PIL Image.
-    The tensor is expected to be of shape (C, H, W).
     """
-    # CLIP's normalization constants
     mean = [0.48145466, 0.4578275, 0.40821073]
     std = [0.26862954, 0.26130258, 0.27577711]
     
-    # Clone the tensor to avoid modifying the original
     denorm_tensor = tensor.clone()
     
-    # Reverse the normalization
     for t, m, s in zip(denorm_tensor, mean, std):
         t.mul_(s).add_(m)
-        
-    # Clamp values to [0, 1] to handle potential floating point inaccuracies
     denorm_tensor = torch.clamp(denorm_tensor, 0, 1)
-    
-    # Convert tensor to PIL Image
     pil_image = TF.to_pil_image(denorm_tensor)
     return pil_image
 
@@ -58,7 +53,6 @@ def evaluate_classifier(args, model, test_loader, dataset, preprocess):
     all_test_items = []
     with torch.no_grad():
         for images, targets in tqdm(test_loader, desc="Collecting"):
-            # We store items on the CPU to conserve GPU memory
             for i in range(images.size(0)):
                 all_test_items.append((images[i].cpu(), targets[i].cpu()))
     
@@ -69,31 +63,25 @@ def evaluate_classifier(args, model, test_loader, dataset, preprocess):
     
     sampled_items = random.sample(all_test_items, num_to_sample)
 
-    images_saved_count = 0
     for i, (image_tensor, target) in enumerate(tqdm(sampled_items, desc="Processing Random Images")):
 
             target = target - 1 
             image_gpu_tensor = image_tensor.to(device).unsqueeze(0)
 
-            # Get model prediction for the single image
             with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
                 image_features = model.encode_image(image_gpu_tensor)
             image_features /= image_features.norm(dim=-1, keepdim=True)
             cosine_similarity = image_features @ text_features.t()
             _, pred_index_tensor = cosine_similarity.topk(1, dim=1)
             
-            # Retrieve labels. NOTE: Your dataset already provides 0-based labels,
-            # so `targets = targets - 1` is not needed here.
             gt_index = target.item()
             pred_index = pred_index_tensor[0].item()
 
             ground_truth_name = dataset.classnames[gt_index]
             predicted_name = dataset.classnames[pred_index]
 
-            # Convert the CPU tensor back to a PIL image for annotation
             annotated_image = denormalize_tensor_to_pil(image_tensor)
 
-            # Annotate and save the image
             draw = ImageDraw.Draw(annotated_image)
             try:
                 font = ImageFont.truetype("arial.ttf", size=20)
@@ -115,65 +103,6 @@ def evaluate_classifier(args, model, test_loader, dataset, preprocess):
             annotated_image.save(os.path.join(save_dir, filename))
 
     print(f"\nFinished! Saved {len(sampled_items)} random annotated images to the '{save_dir}' directory.")
-    # with torch.no_grad():
-    #     for images, targets in tqdm(test_loader, desc="Processing Batches"):
-    #         targets = targets - 1  # Adjust target indices to be 0-based
-    #         images, targets = images.to(device), targets.to(device)
-
-    #         # Get model predictions for the entire batch (efficient)
-    #         with torch.amp.autocast(device_type="cuda", dtype=torch.float16):
-    #             image_features = model.encode_image(images)
-    #         image_features /= image_features.norm(dim=-1, keepdim=True)
-    #         cosine_similarity = image_features @ text_features.t()
-    #         _, pred_indices = cosine_similarity.topk(1, dim=1)
-            
-    #         # --- 3. Process each image in the batch ---
-    #         for i in range(images.size(0)):
-    #             if images_saved_count >= 15:
-    #                 break # Stop after saving 15 images
-
-    #             # Get the tensor for the single image
-    #             image_tensor = images[i].cpu()
-                
-    #             # The label from your loader is already 0-based because of the
-    #             # "label=y-1" logic in your OxfordFlowers class.
-    #             gt_index = targets[i].item()
-    #             pred_index = pred_indices[i].item()
-
-    #             ground_truth_name = dataset.classnames[gt_index]
-    #             predicted_name = dataset.classnames[pred_index]
-
-    #             # Convert the processed tensor back to a PIL image for annotation
-    #             annotated_image = denormalize_tensor_to_pil(image_tensor)
-
-    #             # --- 4. Annotate and save the image ---
-    #             draw = ImageDraw.Draw(annotated_image)
-    #             try:
-    #                 font = ImageFont.truetype("arial.ttf", size=20)
-    #             except IOError:
-    #                 font = ImageFont.load_default()
-
-    #             gt_text = f"Ground Truth: {ground_truth_name.replace('_', ' ')}"
-    #             pred_text = f"Prediction: {predicted_name.replace('_', ' ')}"
-    #             is_correct = (ground_truth_name == predicted_name)
-    #             text_color = "green" if is_correct else "red"
-
-    #             draw.rectangle((2, 2, 300, 50), fill=(0, 0, 0, 128))
-    #             draw.text((5, 5), gt_text, font=font, fill="white")
-    #             draw.text((5, 27), pred_text, font=font, fill=text_color)
-
-    #             safe_gt = ground_truth_name.replace('_', '-').replace(' ', '')
-    #             safe_pred = predicted_name.replace('_', '-').replace(' ', '')
-    #             filename = f"{images_saved_count + 1:02d}_GT_{safe_gt}_PRED_{safe_pred}.png"
-    #             annotated_image.save(os.path.join(save_dir, filename))
-                
-    #             images_saved_count += 1
-
-    #         if images_saved_count >= 15:
-    #             break # Exit the main loop as well
-
-    # print(f"\nFinished! Saved {images_saved_count} annotated images to the '{save_dir}' directory.")
-
 
 def evaluate_monarch(clip_model, loader, dataset):
     clip_model.eval()
@@ -210,12 +139,11 @@ def check_parameters(model, flag):
     if total_params == 0:
         print(f"Warning: No parameters found in the model after {flag} MoRE application.")
 
-    print(f"--- {flag} Parameter Count ---")
-    print(f"--- Parameter Count ---")
+    print(f"{flag} Parameter Count ---")
     print(f"Trainable params: {trainable_params:,}")
     print(f"Total params:     {total_params:,}")
     print(f"Percentage:       {100 * trainable_params / total_params:.4f}%")
-    print(f"-----------------------")
+    print(f"---------------------------------\n")
 
 def run_monarch_training(args, model, logit_scale, dataset, train_loader, val_loader, test_loader):
     """

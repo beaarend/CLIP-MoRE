@@ -1,6 +1,10 @@
 # Auxiliar files for datasets
 datasets/generate_*
 
+# Scripts
+*.sh
+graphics_maker.py
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
